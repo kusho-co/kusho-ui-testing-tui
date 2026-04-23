@@ -3,12 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const readline = require('readline');
-const https = require('https');
-const http = require('http');
 const WaitEnhancer = require('./wait-enhancer');
+const LLMClient = require('./llm-client');
+const { DEFAULT_MODELS } = require('./llm-client');
 
-const BASE_URL = 'be.kusho.ai';
-const PORT = 443;
+const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'gemini'];
 
 class KushoRecorder {
   constructor() {
@@ -23,6 +22,7 @@ class KushoRecorder {
     this.waitEnhancer = new WaitEnhancer();
     this.enableWaitEnhancement = true;
     this.credentialsFile = path.join(process.env.HOME || process.env.USERPROFILE, '.kusho-credentials');
+    this.instructions = '';
   }
 
   async startRecording(url = '', options = {}) {
@@ -37,7 +37,7 @@ class KushoRecorder {
     }
 
     console.log(chalk.blue('🎬 Starting KushoAI recorder...'));
-    
+
     const args = [
       'playwright',
       'codegen',
@@ -93,17 +93,17 @@ class KushoRecorder {
         setTimeout(checkFile, 500);
       }
     };
-    
+
     checkFile();
   }
 
   startFileWatcher() {
-    
+
     this.watcher = fs.watch(this.outputFile, (eventType) => {
       if (eventType === 'change') {
         try {
           const newCode = fs.readFileSync(this.outputFile, 'utf8');
-          
+
           // Only process if code actually changed
           if (newCode !== this.currentCode) {
             this.currentCode = newCode;
@@ -121,7 +121,7 @@ class KushoRecorder {
     let finalCode = code;
     if (this.enableWaitEnhancement) {
       finalCode = this.waitEnhancer.enhanceCode(code);
-      
+
       // Show suggestions
       const suggestions = this.waitEnhancer.analyzeAndSuggestWaits(code);
       if (suggestions.length > 0) {
@@ -129,17 +129,17 @@ class KushoRecorder {
         suggestions.forEach(s => console.log(chalk.yellow(`  • ${s}`)));
       }
     }
-    
+
     // Wrap code in a test function
     finalCode = this.wrapInTestFunction(finalCode);
-    
+
     console.log(chalk.gray('─'.repeat(50)));
     console.log(finalCode);
     console.log(chalk.gray('─'.repeat(50)));
-    
+
     // Update current code with enhanced version
     this.currentCode = finalCode;
-    
+
     // Call user-defined callback if provided
     if (this.onCodeUpdate) {
       this.onCodeUpdate(finalCode);
@@ -147,19 +147,19 @@ class KushoRecorder {
   }
 
   stopRecording() {
-    
+
     if (this.codegenProcess) {
       this.codegenProcess.kill();
       this.codegenProcess = null;
     }
-    
+
     this.stopWatching();
-    
+
     // Return final code
     if (fs.existsSync(this.outputFile)) {
       return fs.readFileSync(this.outputFile, 'utf8');
     }
-    
+
     return this.currentCode;
   }
 
@@ -193,7 +193,7 @@ class KushoRecorder {
     }
 
     console.log(chalk.green('✅ Recording completed!'));
-    
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
@@ -201,7 +201,7 @@ class KushoRecorder {
 
     rl.question(chalk.cyan('💾 Enter filename for your test (without extension): '), (filename) => {
       rl.close();
-      
+
       if (!filename || filename.trim() === '') {
         // Generate default filename with timestamp
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -221,7 +221,7 @@ class KushoRecorder {
       const finalPath = this.saveCodeToUniqueFile(filename);
       console.log(chalk.green(`🎉 Test saved successfully!`));
       console.log(chalk.blue(`📁 File location: ${finalPath}`));
-      
+
       // Open editor for user to edit the file
       this.openEditorInTerminal(finalPath);
     });
@@ -241,20 +241,17 @@ class KushoRecorder {
     }
 
     fs.writeFileSync(fullPath, this.currentCode);
-    
-    // Track recording step completion
-    this.trackUserStep('record');
-    
+
     return fullPath;
   }
 
   openEditorInTerminal(filePath) {
     console.log(chalk.blue('📝 Opening editor...'));
     console.log(chalk.gray('Press Ctrl+X to exit nano, or :wq to exit vim'));
-    
+
     // Try terminal-based editors in order of preference
     const terminalEditors = ['vim', 'nano', 'vi'];
-    
+
     this.tryTerminalEditor(filePath, terminalEditors, 0);
   }
 
@@ -266,7 +263,7 @@ class KushoRecorder {
     }
 
     const editor = editors[index];
-    const editorProcess = spawn(editor, [filePath], { 
+    const editorProcess = spawn(editor, [filePath], {
       stdio: 'inherit'  // This allows the editor to take control of the terminal
     });
 
@@ -278,7 +275,15 @@ class KushoRecorder {
     editorProcess.on('close', (code) => {
       if (code === 0) {
         console.log(chalk.green('✅ File edited successfully!'));
-        this.extendScriptWithAPI(filePath);
+
+        // Prompt for optional instructions before generation starts
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        rl.question(chalk.cyan('\n💡 Any specific instructions for generating test variations? (Press Enter to skip): '), (answer) => {
+          rl.close();
+          const instructions = answer.trim();
+          if (instructions) console.log(chalk.cyan(`📋 Instructions noted: ${instructions}`));
+          this.extendScriptWithAPI(filePath, instructions);
+        });
       } else {
         console.log(chalk.yellow('⚠️  Editor exited with errors while saving recording'));
       }
@@ -289,50 +294,93 @@ class KushoRecorder {
     try {
       if (fs.existsSync(this.credentialsFile)) {
         const data = fs.readFileSync(this.credentialsFile, 'utf8');
-        return JSON.parse(data);
+        const creds = JSON.parse(data);
+
+        // Detect old format { email, token } from the hosted backend era
+        if (creds.email || creds.token) {
+          console.log(chalk.yellow('⚠️  Your saved credentials use the old format (email/token).'));
+          console.log(chalk.blue('🔄 Please re-configure with your LLM provider API key.'));
+          return await this.promptForCredentials();
+        }
+
+        if (creds.provider && creds.apiKey) {
+          return creds;
+        }
       }
     } catch (error) {
       console.log(chalk.yellow('⚠️  Error reading credentials file'));
     }
-    
+
     return await this.promptForCredentials();
   }
 
   async promptForCredentials() {
-    console.log(chalk.blue('🔐 KushoAI credentials required for script extension'));
-    
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    console.log(chalk.blue('\n🔐 Configure your LLM provider to power KushoAI test generation'));
+    console.log(chalk.gray('Your API key is stored locally in ~/.kusho-credentials and never sent anywhere except your chosen provider.\n'));
 
-    return new Promise((resolve) => {
-      rl.question(chalk.cyan('📧 Enter your email: '), (email) => {
-        rl.question(chalk.cyan('🔑 Enter your auth token: '), (token) => {
-          rl.close();
-          
-          const credentials = { email, token };
-          
-          // Save credentials to file
-          try {
-            fs.writeFileSync(this.credentialsFile, JSON.stringify(credentials, null, 2));
-            console.log(chalk.green('✅ Credentials saved successfully!'));
-            
-            // Track credentials step completion
-            this.trackUserStep('credentials', credentials);
-          } catch (error) {
-            console.log(chalk.yellow('⚠️  Warning: Could not save credentials'));
-          }
-          
-          resolve(credentials);
-        });
-      });
-    });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q) => new Promise((res) => rl.question(q, res));
+
+    // Step 1: Choose provider
+    console.log(chalk.cyan('🤖 Choose your LLM provider:'));
+    console.log('  1) OpenAI   (default model: gpt-4o)');
+    console.log('  2) Anthropic (default model: claude-3-5-sonnet-20241022)');
+    console.log('  3) Gemini   (default model: gemini-2.5-flash)');
+
+    let provider;
+    while (!provider) {
+      const choice = (await ask(chalk.cyan('Enter number (1-3): '))).trim();
+      const map = { '1': 'openai', '2': 'anthropic', '3': 'gemini' };
+      provider = map[choice] || (SUPPORTED_PROVIDERS.includes(choice) ? choice : null);
+      if (!provider) console.log(chalk.red('Invalid choice. Enter 1, 2, or 3.'));
+    }
+
+    // Step 2: API key
+    const apiKey = (await ask(chalk.cyan(`🔑 Enter your ${provider} API key: `))).trim();
+    if (!apiKey) {
+      rl.close();
+      throw new Error('API key cannot be empty');
+    }
+
+    // Step 3: Optional model override
+    const defaultModel = DEFAULT_MODELS[provider];
+    const modelInput = (await ask(chalk.cyan(`🧠 Model (press Enter for default: ${defaultModel}): `))).trim();
+    const model = modelInput || defaultModel;
+
+    rl.close();
+
+    const credentials = { provider, apiKey, model };
+
+    // Validate API key before saving — fail fast like backend validate_config()
+    console.log(chalk.blue(`\n🔍 Validating ${provider} API key...`));
+    try {
+      const llm = new LLMClient(credentials);
+      const result = await llm.validateCredentials();
+      if (!result.valid) {
+        console.log(chalk.red(`❌ Invalid API key: ${result.error}`));
+        console.log(chalk.yellow('Please try again with a valid API key.'));
+        return await this.promptForCredentials();
+      }
+      console.log(chalk.green(`✅ API key valid!`));
+    } catch (error) {
+      console.log(chalk.red(`❌ Could not validate API key: ${error.message}`));
+      console.log(chalk.yellow('Please try again with a valid API key.'));
+      return await this.promptForCredentials();
+    }
+
+    try {
+      fs.writeFileSync(this.credentialsFile, JSON.stringify(credentials, null, 2));
+      console.log(chalk.green(`✅ Credentials saved! Using ${provider} / ${model}`));
+    } catch (error) {
+      console.log(chalk.yellow('⚠️  Warning: Could not save credentials to file'));
+    }
+
+    return credentials;
   }
 
   async promptForNewFilename(currentFilename) {
     console.log(chalk.blue('📝 Please provide a new filename for the extended test'));
-    
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
@@ -341,14 +389,14 @@ class KushoRecorder {
     return new Promise((resolve) => {
       rl.question(chalk.cyan(`💾 Enter new filename (current: ${currentFilename}): `), (newFilename) => {
         rl.close();
-        
+
         if (!newFilename || newFilename.trim() === '') {
           resolve(null); // User wants to cancel
           return;
         }
-        
+
         let finalFilename = newFilename.trim();
-        
+
         // Ensure .test.js extension if the original had it
         if (currentFilename.endsWith('.test.js') && !finalFilename.endsWith('.test.js')) {
           if (finalFilename.endsWith('.js')) {
@@ -359,7 +407,7 @@ class KushoRecorder {
         } else if (currentFilename.endsWith('.js') && !finalFilename.endsWith('.js')) {
           finalFilename += '.js';
         }
-        
+
         // Check if the new filename also exists
         const newPath = path.join(this.extendedDir, finalFilename);
         if (fs.existsSync(newPath)) {
@@ -372,33 +420,29 @@ class KushoRecorder {
     });
   }
 
-  async extendScriptWithAPI(filePath) {
-    console.log(chalk.blue('🚀 Extending script with KushoAI variations...'));
-    
+  async extendScriptWithAPI(filePath, instructions = '') {
+    console.log(chalk.blue('\n🚀 Extending script with KushoAI...'));
+
     try {
-      // Get credentials
       const credentials = await this.getCredentials();
-      
-      // Read current file content
+      const llm = new LLMClient(credentials);
       const currentContent = fs.readFileSync(filePath, 'utf8');
-      
+
       // Step 1: Generate test cases
-      const testCases = await this.generateTestCases(currentContent, credentials);
-      
+      const testCases = await this.generateTestCases(currentContent, llm, instructions);
+
       // Step 2: Let user edit test cases
       const editedTestCases = await this.editTestCases(testCases);
-      
-      // Step 3: Generate extended script with edited test cases
-      const {extendedScript, remaining} = await this.generateExtendedScript(currentContent, editedTestCases, credentials);
-      
-      // Save extended script to extended-tests folder
+
+      // Step 3: Generate extended script
+      const extendedScript = await this.generateExtendedScript(currentContent, editedTestCases, llm, instructions);
+
+      // Save to extended-tests folder
       let extendedFilePath = this.createExtendedFilePath(filePath);
-      
-      // Check if file already exists and prompt for new name if needed
+
       if (fs.existsSync(extendedFilePath)) {
         const currentFilename = path.basename(extendedFilePath);
         console.log(chalk.yellow(`⚠️  File already exists: ${currentFilename}`));
-        
         const newFilename = await this.promptForNewFilename(currentFilename);
         if (newFilename) {
           extendedFilePath = path.join(this.extendedDir, newFilename);
@@ -407,39 +451,31 @@ class KushoRecorder {
           return;
         }
       }
-      
+
       fs.writeFileSync(extendedFilePath, extendedScript);
-      
-      console.log(chalk.green('🎉 Script extended successfully!'));
+
+      console.log(chalk.green('\n🎉 Script extended successfully!'));
       console.log(chalk.blue(`📁 Original file preserved: ${filePath}`));
-      console.log(chalk.blue(`📁 Extended script saved: ${extendedFilePath}`));
-      console.log(chalk.yellow(`# No. of generations remaining: ${remaining}`));
-      
-      // Track generation step completion
-      this.trackUserStep('generation');
-      
+      console.log(chalk.blue(`📁 Extended script saved:   ${extendedFilePath}`));
+
+      // Step 4: Post-generation interactive edit loop
+      // await this.postGenerationEditLoop(extendedFilePath, llm);
+
     } catch (error) {
       console.log(chalk.red('❌ Error extending script:'), error.message);
       console.log(chalk.blue(`📁 Original file preserved: ${filePath}`));
     }
   }
 
-  async generateTestCases(scriptContent, credentials) {
+  async generateTestCases(scriptContent, llm, instructions = '') {
     console.log(chalk.blue('🎯 Generating test cases...'));
-    
-    // Start loading indicator
     const loadingInterval = this.showLoadingIndicator('Analyzing script and generating test cases...');
-    
     try {
-      const testCases = await this.callTestCasesAPI(scriptContent, credentials);
-      
-      // Stop loading indicator
+      const testCases = await llm.generateTestCases(scriptContent, instructions);
       clearInterval(loadingInterval);
       process.stdout.write('\n');
-      
       console.log(chalk.green('✅ Test cases generated successfully!'));
       return testCases;
-      
     } catch (error) {
       clearInterval(loadingInterval);
       process.stdout.write('\n');
@@ -449,55 +485,46 @@ class KushoRecorder {
 
   async editTestCases(testCases) {
     console.log(chalk.blue('📝 Opening test cases for review...'));
-    
+
     // Create temporary file for test cases
     const tempDir = path.join(__dirname, 'temp');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
-    
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const tempFile = path.join(tempDir, `test-cases-${timestamp}.txt`);
-    
+
     // Write test cases to temp file
     fs.writeFileSync(tempFile, testCases);
-    
+
     console.log(chalk.yellow('💡 Review and edit the test cases. Save and exit when done.'));
     console.log(chalk.gray('Each line represents a test case to be generated.'));
-    
+
     // Open editor for test cases
     await this.openEditorForFile(tempFile);
-    
+
     // Read edited test cases
     const editedTestCases = fs.readFileSync(tempFile, 'utf8');
-    
+
     // Clean up temp file
     fs.unlinkSync(tempFile);
-    
+
     console.log(chalk.green('✅ Test cases reviewed and saved!'));
-    
-    // Track tests step completion
-    this.trackUserStep('tests');
-    
     return editedTestCases;
   }
 
-  async generateExtendedScript(originalScript, testCases, credentials) {
+  async generateExtendedScript(originalScript, testCases, llm, instructions = '') {
     console.log(chalk.blue('🔨 Generating extended test script...'));
-    
+
     // Start loading indicator
     const loadingInterval = this.showLoadingIndicator('Creating test variations...');
-    
     try {
-      const {extended_script: extendedScript, remaining_generations: remaining} = await this.callGenerateScriptAPI(originalScript, testCases, credentials);
-      
-      // Stop loading indicator
+      const extendedScript = await llm.generateTestScripts(originalScript, testCases, instructions);
       clearInterval(loadingInterval);
       process.stdout.write('\n');
-      
       console.log(chalk.green('✅ Extended script generated successfully!'));
-      return {extendedScript, remaining};
-      
+      return extendedScript;
     } catch (error) {
       clearInterval(loadingInterval);
       process.stdout.write('\n');
@@ -511,7 +538,7 @@ class KushoRecorder {
     const frames = [...emojiFrames, ...classicFrames];
     const spinnerWidth = 4;
     let frameIndex = 0;
-  
+
     return setInterval(() => {
       const frame = frames[frameIndex % frames.length];
       const paddedFrame = frame.padEnd(spinnerWidth, ' ');
@@ -523,10 +550,10 @@ class KushoRecorder {
   async openEditorForFile(filePath) {
     console.log(chalk.blue('📝 Opening editor...'));
     console.log(chalk.gray('Press Ctrl+X to exit nano, or :wq to exit vim'));
-    
+
     // Try terminal-based editors in order of preference
     const terminalEditors = ['vim', 'nano', 'vi'];
-    
+
     return new Promise((resolve, reject) => {
       this.tryTerminalEditorForFile(filePath, terminalEditors, 0, resolve, reject);
     });
@@ -539,7 +566,7 @@ class KushoRecorder {
     }
 
     const editor = editors[index];
-    const editorProcess = spawn(editor, [filePath], { 
+    const editorProcess = spawn(editor, [filePath], {
       stdio: 'inherit'  // This allows the editor to take control of the terminal
     });
 
@@ -558,113 +585,67 @@ class KushoRecorder {
     });
   }
 
-  async callTestCasesAPI(scriptContent, credentials) {
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        script: scriptContent
-      });
-
-      const options = {
-        hostname: BASE_URL,
-        port: PORT,
-        path: '/ui-testing-v2/generate-test-cases',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-          'X-User-Email': credentials.email,
-          'X-Auth-Token': credentials.token
-        },
-        rejectUnauthorized: false
-      };
-
-      const req = https.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              const response = JSON.parse(data);
-              if (response.success && response.test_cases) {
-                resolve(response.test_cases);
-              } else {
-                reject(new Error('Invalid response format from test cases API'));
-              }
-            } catch (error) {
-              reject(new Error('Failed to parse test cases response'));
-            }
-          } else {
-            reject(new Error(`Test cases API returned status ${res.statusCode}: ${data}`));
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        reject(error);
-      });
-
-      req.write(postData);
-      req.end();
-    });
+  async callTestCasesAPI(scriptContent, credentials, instructions = '') {
+    const llm = new LLMClient(credentials);
+    return llm.generateTestCases(scriptContent, instructions);
   }
 
-  async callGenerateScriptAPI(originalScript, testCases, credentials) {
-    return new Promise((resolve, reject) => {
-      const postData = JSON.stringify({
-        script: originalScript,
-        test_cases: testCases
-      });
+  async callGenerateScriptAPI(originalScript, testCases, credentials, instructions = '') {
+    const llm = new LLMClient(credentials);
+    const script = await llm.generateTestScripts(originalScript, testCases, instructions);
+    return { extended_script: script, remaining_generations: null };
+  }
 
-      const options = {
-        hostname: BASE_URL,
-        port: PORT,
-        path: '/ui-testing-v2/generate-test-scripts',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-          'X-User-Email': credentials.email,
-          'X-Auth-Token': credentials.token
-        },
-        rejectUnauthorized: false
-      };
+  async callEditScriptAPI(script, instruction, credentials) {
+    const llm = new LLMClient(credentials);
+    const editedScript = await llm.editTestScript(script, instruction);
+    return { edited_script: editedScript, remaining_generations: null };
+  }
 
-      const req = https.request(options, (res) => {
-        let data = '';
+  // ---------------------------------------------------------------------------
+  // Post-generation interactive edit loop
+  // ---------------------------------------------------------------------------
 
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
+  async postGenerationEditLoop(filePath, llm) {
+    console.log(chalk.blue('\n✏️  Post-generation edit mode'));
+    console.log(chalk.gray('Request changes to the generated tests in plain English.'));
+    console.log(chalk.gray('Examples: "add assertions for the page title", "add error case for empty password"'));
+    console.log(chalk.gray('Type "done" or leave blank to finish.\n'));
 
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            try {
-              const response = JSON.parse(data);
-              resolve(response);
-            } catch (error) {
-              resolve(data); // Return raw data if not JSON, maybe fail here
-            }
-          } else {
-            reject(new Error(`Generate script API returned status ${res.statusCode}: ${data}`));
-          }
-        });
-      });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = () => new Promise((res) => rl.question(chalk.cyan('✏️  Edit instruction (or "done" to exit): '), res));
 
-      req.on('error', (error) => {
-        reject(error);
-      });
+    while (true) {
+      const instruction = (await ask()).trim();
 
-      req.write(postData);
-      req.end();
-    });
+      if (!instruction || instruction.toLowerCase() === 'done' || instruction.toLowerCase() === 'exit') {
+        rl.close();
+        console.log(chalk.green('\n✅ Finished! Your tests are ready.'));
+        console.log(chalk.blue(`📁 Final file: ${filePath}`));
+        break;
+      }
+
+      console.log(chalk.blue(`\n🔧 Applying: "${instruction}"...`));
+      const loadingInterval = this.showLoadingIndicator('Applying edits...');
+
+      try {
+        const currentScript = fs.readFileSync(filePath, 'utf8');
+        const editedScript = await llm.editTestScript(currentScript, instruction);
+        clearInterval(loadingInterval);
+        process.stdout.write('\n');
+        fs.writeFileSync(filePath, editedScript);
+        console.log(chalk.green('✅ Edit applied successfully!'));
+      } catch (error) {
+        clearInterval(loadingInterval);
+        process.stdout.write('\n');
+        console.log(chalk.red(`❌ Edit failed: ${error.message}`));
+        console.log(chalk.gray('File was not modified. Try a different instruction.'));
+      }
+    }
   }
 
   async updateCredentials() {
-    console.log(chalk.blue('🔐 Update KushoAI credentials'));
+    console.log(chalk.blue('🔐 Configure LLM provider credentials'));
     const credentials = await this.promptForCredentials();
     return credentials;
   }
@@ -680,7 +661,7 @@ class KushoRecorder {
     let testStartIndex = 0;
     let imports = '';
     let setup = '';
-    
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (line.startsWith('import ') || line.startsWith('const ') || line.startsWith('require(')) {
@@ -695,7 +676,7 @@ class KushoRecorder {
     }
 
     const testCode = lines.slice(testStartIndex).join('\n');
-    
+
     // Create wrapped test function
     const wrappedCode = `${imports}
 const { test, expect } = require('@playwright/test');
@@ -712,10 +693,10 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
     if (!fs.existsSync(this.extendedDir)) {
       fs.mkdirSync(this.extendedDir, { recursive: true });
     }
-    
+
     const ext = path.extname(originalPath);
     const baseName = path.basename(originalPath, ext);
-    
+
     // Handle both .js and .test.js extensions, preserve original filename
     if (originalPath.endsWith('.test.js')) {
       const nameWithoutTestExt = baseName.replace(/\.test$/, '');
@@ -753,9 +734,7 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
   async runTest(filePath, options = {}) {
     console.log(chalk.blue('🧪 Running Playwright test...'));
     console.log(chalk.gray(`📁 File: ${filePath}`));
-    // Track run step completion
-    this.trackUserStep('run');
-    
+
     // Check if file needs to be wrapped in test function
     const content = fs.readFileSync(filePath, 'utf8');
     if (!content.includes('test(') && !content.includes('describe(')) {
@@ -764,14 +743,14 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
       fs.writeFileSync(filePath, wrappedContent);
       console.log(chalk.green('✅ File converted to test format'));
     }
-    
+
     // Determine which project to use based on file path and options
     const project = this.getProjectName(filePath, options);
-    
+
     // Use relative path to file within the project directory
     const relativePath = this.getRelativePathForProject(filePath, project);
     const args = ['playwright', 'test', `--project=${project}`, relativePath];
-    
+
     // Add headed/headless option
     if (options.headed) {
       args.push('--headed');
@@ -823,7 +802,7 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
   getProjectName(filePath, options) {
     const isRecording = filePath.includes(path.join('kusho-tests', 'recordings'));
     const isExtended = filePath.includes(path.join('kusho-tests', 'extended-tests'));
-    
+
     if (isRecording) {
       return options.record ? 'recordings-record' : 'recordings';
     } else if (isExtended) {
@@ -841,25 +820,25 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
 
   showRecordingResults() {
     const testResultsDir = path.join(process.cwd(), 'test-results');
-    
+
     if (fs.existsSync(testResultsDir)) {
       console.log(chalk.green('📹 Test recording completed!'));
       console.log(chalk.blue('🔍 View results:'));
-      
+
       // Find trace files
       const traceFiles = fs.readdirSync(testResultsDir, { recursive: true })
         .filter(file => file.toString().endsWith('.zip'))
         .slice(0, 3); // Show only latest 3
-      
+
       traceFiles.forEach(file => {
         console.log(chalk.cyan(`  • npx playwright show-trace test-results/${file}`));
       });
-      
+
       // Find video files
       const videoFiles = fs.readdirSync(testResultsDir, { recursive: true })
         .filter(file => file.toString().endsWith('.webm'))
         .slice(0, 3); // Show only latest 3
-      
+
       if (videoFiles.length > 0) {
         console.log(chalk.blue('🎬 Video recordings:'));
         videoFiles.forEach(file => {
@@ -995,9 +974,9 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
     return new Promise((resolve) => {
       rl.question(chalk.yellow('Select a test (number or name): '), (answer) => {
         rl.close();
-        
+
         const trimmed = answer.trim();
-        
+
         // Check if it's a number
         const num = parseInt(trimmed);
         if (!isNaN(num)) {
@@ -1009,19 +988,19 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
             return;
           }
         }
-        
+
         // Check if it's a filename
         if (trimmed === 'latest') {
           resolve('latest');
           return;
         }
-        
-        const matchingFile = files.find(file => 
-          file === trimmed || 
-          file === `${trimmed}.test.js` || 
+
+        const matchingFile = files.find(file =>
+          file === trimmed ||
+          file === `${trimmed}.test.js` ||
           file === `${trimmed}.js`
         );
-        
+
         if (matchingFile) {
           resolve(matchingFile);
         } else {
@@ -1070,9 +1049,9 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
     return new Promise((resolve) => {
       rl.question(chalk.yellow('Select a recording (number or name): '), (answer) => {
         rl.close();
-        
+
         const trimmed = answer.trim();
-        
+
         // Check if it's a number
         const num = parseInt(trimmed);
         if (!isNaN(num)) {
@@ -1084,19 +1063,19 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
             return;
           }
         }
-        
+
         // Check if it's a filename
         if (trimmed === 'latest') {
           resolve('latest');
           return;
         }
-        
-        const matchingFile = files.find(file => 
-          file === trimmed || 
-          file === `${trimmed}.test.js` || 
+
+        const matchingFile = files.find(file =>
+          file === trimmed ||
+          file === `${trimmed}.test.js` ||
           file === `${trimmed}.js`
         );
-        
+
         if (matchingFile) {
           resolve(matchingFile);
         } else {
@@ -1132,66 +1111,6 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
     }
   }
 
-  async trackUserStep(step, credentials = null) {
-    try {
-      // Get credentials if not provided
-      if (!credentials) {
-        credentials = await this.getCredentials();
-      }
-
-      const postData = JSON.stringify({
-        step: step
-      });
-
-      const options = {
-        hostname: BASE_URL,
-        port: PORT,
-        path: '/ui-testing-v2/user/status',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-          'X-User-Email': credentials.email,
-          'X-Auth-Token': credentials.token
-        },
-        rejectUnauthorized: false
-      };
-
-      return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
-          let data = '';
-
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              // console.log(chalk.gray(`📊 Step tracked: ${step}`));
-              resolve(data);
-            } else {
-              // Don't throw error for tracking failures, just log
-              console.log(chalk.gray(`⚠️  Failed to track step: ${step}`));
-              resolve(null);
-            }
-          });
-        });
-
-        req.on('error', (error) => {
-          // Don't throw error for tracking failures, just log
-          console.log(chalk.gray(`⚠️  Error tracking step: ${step}`));
-          resolve(null);
-        });
-
-        req.write(postData);
-        req.end();
-      });
-    } catch (error) {
-      // Don't throw error for tracking failures, just log
-      console.log(chalk.gray(`⚠️  Error tracking step: ${step}`));
-      return null;
-    }
-  }
 }
 
 module.exports = KushoRecorder;

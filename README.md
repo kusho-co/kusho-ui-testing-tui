@@ -99,19 +99,20 @@ After linking, you can use the `kusho` command syntax throughout your terminal.
 
 ## Getting Started
 
-### Step 1: Setup Credentials
+### Step 1: Configure LLM Provider
 
-Before recording, configure your authentication:
+KushoAI CLI runs entirely locally and generates tests using your own LLM API keys. Before recording, configure your preferred provider:
 
 ```bash
 kusho credentials
 ```
 
-You'll be prompted to enter:
-- Your email address
-- Authentication token (get this from the Kusho webapp UI Testing section)
+You'll be prompted to choose a provider and enter your API key:
+1. **OpenAI** (default model: `gpt-4o`) - [Get an API key](https://platform.openai.com/api-keys)
+2. **Anthropic** (default model: `claude-3-5-sonnet-20241022`) - [Get an API key](https://console.anthropic.com/settings/keys)
+3. **Gemini** (default model: `gemini-1.5-pro`) - [Get an API key](https://aistudio.google.com/app/apikey)
 
-This step is required for CLI authentication and must be completed before recording.
+You can optionally override the default model during setup. Your API keys are stored locally in `~/.kusho-credentials` and are never sent to any external servers other than your chosen LLM provider.
 
 ## Workflow
 
@@ -268,9 +269,9 @@ After running tests, you'll get comprehensive reports with:
 - Error details and debugging information
 - HTML report accessible via browser
 
-### Update Credentials
+### Update LLM Provider Settings
 
-Update your KushoAI credentials anytime:
+Change your LLM provider or update your API key anytime:
 
 ```bash
 kusho credentials
