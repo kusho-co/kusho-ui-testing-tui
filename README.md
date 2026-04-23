@@ -108,9 +108,9 @@ kusho credentials
 ```
 
 You'll be prompted to choose a provider and enter your API key:
-1. **OpenAI** (default model: `gpt-4o`) - [Get an API key](https://platform.openai.com/api-keys)
-2. **Anthropic** (default model: `claude-3-5-sonnet-20241022`) - [Get an API key](https://console.anthropic.com/settings/keys)
-3. **Gemini** (default model: `gemini-1.5-pro`) - [Get an API key](https://aistudio.google.com/app/apikey)
+1. **OpenAI** (default model: `gpt-4o-mini`) - [Get an API key](https://platform.openai.com/api-keys)
+2. **Anthropic** (default model: `claude-haiku-4-5-20251001`) - [Get an API key](https://console.anthropic.com/settings/keys)
+3. **Gemini** (default model: `gemini-2.5-flash`) - [Get an API key](https://aistudio.google.com/app/apikey)
 
 You can optionally override the default model during setup. Your API keys are stored locally in `~/.kusho-credentials` and are never sent to any external servers other than your chosen LLM provider.
 
@@ -202,6 +202,26 @@ Try the recorder with Playwright's demo site:
 ```bash
 kusho demo
 ```
+
+### Interactive TUI (New)
+
+Open full interactive terminal UI for running flows directly:
+
+```bash
+kusho ui
+```
+
+Inside TUI:
+- `r` start recording flow
+- `e` extend selected recording (or latest)
+- `t` run selected extended test (or latest)
+- `y` run selected recording (or latest)
+- `h` run selected/latest extended test in headed mode
+- `c` open credentials setup
+- `d` run demo flow
+- `a` refresh artifacts list
+- `Enter` show selected file path
+- `q` quit
 
 ### Step 3: Review & Edit Tests
 

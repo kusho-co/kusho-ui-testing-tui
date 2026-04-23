@@ -3,9 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const readline = require('readline');
+const { Select } = require('enquirer');
 const WaitEnhancer = require('./wait-enhancer');
 const LLMClient = require('./llm-client');
 const { DEFAULT_MODELS } = require('./llm-client');
+const ui = require('./ui');
 
 const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'gemini'];
 
@@ -36,7 +38,7 @@ class KushoRecorder {
       fs.unlinkSync(this.outputFile);
     }
 
-    console.log(chalk.blue('🎬 Starting KushoAI recorder...'));
+    ui.info('Starting KushoAI recorder...');
 
     const args = [
       'playwright',
@@ -64,7 +66,7 @@ class KushoRecorder {
 
     // Handle process events
     this.codegenProcess.on('error', (error) => {
-      console.error(chalk.red('❌ Failed to start recorder:'), error.message);
+      ui.error(`Failed to start recorder: ${error.message}`);
     });
 
     this.codegenProcess.on('close', (code) => {
@@ -78,7 +80,7 @@ class KushoRecorder {
     return new Promise((resolve) => {
       // Wait a bit for the process to start
       setTimeout(() => {
-        console.log(chalk.green('✅ KushoAI recorder started! Interact with the browser to generate code.'));
+        ui.success('KushoAI recorder started! Interact with browser to generate code.');
         resolve();
       }, 2000);
     });
@@ -246,7 +248,7 @@ class KushoRecorder {
   }
 
   openEditorInTerminal(filePath) {
-    console.log(chalk.blue('📝 Opening editor...'));
+    ui.info('Opening editor...');
     console.log(chalk.gray('Press Ctrl+X to exit nano, or :wq to exit vim'));
 
     // Try terminal-based editors in order of preference
@@ -257,8 +259,8 @@ class KushoRecorder {
 
   tryTerminalEditor(filePath, editors, index) {
     if (index >= editors.length) {
-      console.log(chalk.yellow('⚠️  No terminal editor found'));
-      console.log(chalk.cyan(`📁 You can manually edit: ${filePath}`));
+      ui.warning('No terminal editor found');
+      ui.hint(`You can manually edit: ${filePath}`);
       return;
     }
 
@@ -308,14 +310,15 @@ class KushoRecorder {
         }
       }
     } catch (error) {
-      console.log(chalk.yellow('⚠️  Error reading credentials file'));
+      ui.warning('Error reading credentials file');
     }
 
     return await this.promptForCredentials();
   }
 
   async promptForCredentials() {
-    console.log(chalk.blue('\n🔐 Configure your LLM provider to power KushoAI test generation'));
+    ui.section('Configure LLM Provider');
+    ui.info('Configure your LLM provider to power KushoAI test generation');
     console.log(chalk.gray('Your API key is stored locally in ~/.kusho-credentials and never sent anywhere except your chosen provider.\n'));
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -422,7 +425,8 @@ class KushoRecorder {
   }
 
   async extendScriptWithAPI(filePath, instructions = '') {
-    console.log(chalk.blue('\n🚀 Extending script with KushoAI...'));
+    ui.section('Extend Script');
+    ui.info('Extending script with KushoAI...');
 
     try {
       const credentials = await this.getCredentials();
@@ -461,8 +465,8 @@ class KushoRecorder {
       console.log(chalk.gray('💡 Tip: Use `kusho edit` to make further changes to the generated script.'));
 
     } catch (error) {
-      console.log(chalk.red('❌ Error extending script:'), error.message);
-      console.log(chalk.blue(`📁 Original file preserved: ${filePath}`));
+      ui.error(`Error extending script: ${error.message}`);
+      ui.info(`Original file preserved: ${filePath}`);
     }
   }
 
@@ -547,7 +551,7 @@ class KushoRecorder {
   }
 
   async openEditorForFile(filePath) {
-    console.log(chalk.blue('📝 Opening editor...'));
+    ui.info('Opening editor...');
     console.log(chalk.gray('Press Ctrl+X to exit nano, or :wq to exit vim'));
 
     // Try terminal-based editors in order of preference
@@ -966,55 +970,18 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
       return null;
     }
 
-    console.log(chalk.blue('📋 Available extended tests:'));
-    files.forEach((file, index) => {
-      console.log(chalk.cyan(`  ${index + 1}. ${file}`));
-    });
-    console.log(chalk.cyan(`  ${files.length + 1}. latest`));
-
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
+    const prompt = new Select({
+      name: 'extendedTest',
+      message: 'Choose extended test',
+      choices: [...files, 'latest'],
     });
 
-    return new Promise((resolve) => {
-      rl.question(chalk.yellow('Select a test (number or name): '), (answer) => {
-        rl.close();
-
-        const trimmed = answer.trim();
-
-        // Check if it's a number
-        const num = parseInt(trimmed);
-        if (!isNaN(num)) {
-          if (num >= 1 && num <= files.length) {
-            resolve(files[num - 1]);
-            return;
-          } else if (num === files.length + 1) {
-            resolve('latest');
-            return;
-          }
-        }
-
-        // Check if it's a filename
-        if (trimmed === 'latest') {
-          resolve('latest');
-          return;
-        }
-
-        const matchingFile = files.find(file =>
-          file === trimmed ||
-          file === `${trimmed}.test.js` ||
-          file === `${trimmed}.js`
-        );
-
-        if (matchingFile) {
-          resolve(matchingFile);
-        } else {
-          console.log(chalk.red('❌ Invalid selection'));
-          resolve(null);
-        }
-      });
-    });
+    try {
+      return await prompt.run();
+    } catch (error) {
+      ui.warning('Selection cancelled');
+      return null;
+    }
   }
 
   async chooseRecording() {
@@ -1041,55 +1008,18 @@ ${testCode.split('\n').map(line => line.trim() ? '  ' + line : line).join('\n')}
       return null;
     }
 
-    console.log(chalk.blue('📋 Available recordings:'));
-    files.forEach((file, index) => {
-      console.log(chalk.cyan(`  ${index + 1}. ${file}`));
-    });
-    console.log(chalk.cyan(`  ${files.length + 1}. latest`));
-
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
+    const prompt = new Select({
+      name: 'recording',
+      message: 'Choose recording',
+      choices: [...files, 'latest'],
     });
 
-    return new Promise((resolve) => {
-      rl.question(chalk.yellow('Select a recording (number or name): '), (answer) => {
-        rl.close();
-
-        const trimmed = answer.trim();
-
-        // Check if it's a number
-        const num = parseInt(trimmed);
-        if (!isNaN(num)) {
-          if (num >= 1 && num <= files.length) {
-            resolve(files[num - 1]);
-            return;
-          } else if (num === files.length + 1) {
-            resolve('latest');
-            return;
-          }
-        }
-
-        // Check if it's a filename
-        if (trimmed === 'latest') {
-          resolve('latest');
-          return;
-        }
-
-        const matchingFile = files.find(file =>
-          file === trimmed ||
-          file === `${trimmed}.test.js` ||
-          file === `${trimmed}.js`
-        );
-
-        if (matchingFile) {
-          resolve(matchingFile);
-        } else {
-          console.log(chalk.red('❌ Invalid selection'));
-          resolve(null);
-        }
-      });
-    });
+    try {
+      return await prompt.run();
+    } catch (error) {
+      ui.warning('Selection cancelled');
+      return null;
+    }
   }
 
   getLatestExtendedTest() {

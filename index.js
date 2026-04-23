@@ -4,6 +4,8 @@ const { program } = require('commander');
 const chalk = require('chalk');
 const fs = require('fs');
 const KushoRecorder = require('./recorder');
+const ui = require('./ui');
+const { startTUI } = require('./tui');
 
 program
   .name('kusho')
@@ -40,19 +42,19 @@ program
       
       // Handle graceful shutdown
       process.on('SIGINT', () => {
-        console.log(chalk.yellow('\n🛑 Received interrupt signal...'));
+        ui.warning('Received interrupt signal...');
         const finalCode = recorder.stopRecording();
         
         if (finalCode && options.output) {
           recorder.saveCodeToFile(options.output);
         }
         
-        console.log(chalk.green('✅ Recording session completed!'));
+        ui.success('Recording session completed!');
         process.exit(0);
       });
       
     } catch (error) {
-      console.error(chalk.red('❌ Error:'), error.message);
+      ui.error(`Error: ${error.message}`);
       process.exit(1);
     }
   });
@@ -61,7 +63,7 @@ program
   .command('demo')
   .description('Demo the recorder with a sample URL')
   .action(async () => {
-    console.log(chalk.blue('🚀 Starting demo with KushoAI...'));
+    ui.info('Starting demo with KushoAI...');
     
     const recorder = new KushoRecorder();
     await recorder.startRecording('https://demo.playwright.dev/todomvc');
@@ -73,7 +75,14 @@ program
   .action(async () => {
     const recorder = new KushoRecorder();
     await recorder.updateCredentials();
-    console.log(chalk.green('✅ Credentials updated successfully!'));
+    ui.success('Credentials updated successfully!');
+  });
+
+program
+  .command('ui')
+  .description('Open lightweight terminal UI')
+  .action(() => {
+    startTUI();
   });
 
 program
