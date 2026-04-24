@@ -220,6 +220,13 @@ After recording, Kusho AI generates comprehensive test scenarios that open in yo
 
 **Save the file to proceed to test generation.**
 
+After saving, you'll be prompted to provide optional instructions to guide the AI:
+
+```
+💡 Any specific instructions for generating test variations? (Press Enter to skip):
+> add error handling tests and verify error messages are displayed correctly
+```
+
 ### Step 4: Generate Exhaustive Test Script
 
 Kusho combines your recording and customized tests to create a comprehensive, executable test script. This process:
@@ -227,6 +234,21 @@ Kusho combines your recording and customized tests to create a comprehensive, ex
 - Creates multiple test variations and edge cases
 - Converts everything into optimized Playwright code
 - Generates a comprehensive test script ready for execution
+
+Once generated, you'll enter an interactive edit loop to refine the script using plain English. Type `done` to finish.
+
+```
+✏️  Edit instruction (or "done" to exit): add assertions for the page title
+✅ Edit applied!
+
+✏️  Edit instruction (or "done" to exit): done
+```
+
+You can also re-enter this edit loop anytime using:
+
+```bash
+kusho edit [filename|latest]
+```
 
 ### Extend Existing Test File (Advanced)
 
