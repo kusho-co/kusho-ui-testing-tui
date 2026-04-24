@@ -99,6 +99,7 @@ function startTUI(statusMessage = 'UI ready.') {
     content: [
       'r: record flow',
       'e: extend selected recording (or latest)',
+      'i: edit/edit selected extended test',
       't: run selected extended test (or latest)',
       'y: run selected recording (or latest)',
       'h: run headed selected/latest extended test',
@@ -139,6 +140,15 @@ function startTUI(statusMessage = 'UI ready.') {
     execute(['extend', 'latest'], 'extend latest');
   }
 
+  function actionEdit() {
+    const item = selectedArtifact();
+    if (item && item.type === 'extended') {
+      execute(['edit', item.file], `edit ${item.file}`);
+      return;
+    }
+    execute(['edit', 'latest'], 'edit latest');
+  }
+
   function actionRunExtended(headed = false) {
     const item = selectedArtifact();
     const args = ['run'];
@@ -163,7 +173,10 @@ function startTUI(statusMessage = 'UI ready.') {
   listPane.on('select', () => {
     const item = selectedArtifact();
     if (!item) return;
-    logPane.log(`{green-fg}Selected:{/green-fg} ${item.file} (${item.type})`);
+    const actions = item.type === 'recording'
+      ? '{cyan-fg}Actions:{/cyan-fg} e=extend, y=run-recording'
+      : '{cyan-fg}Actions:{/cyan-fg} i=edit, t=run, h=run-headed';
+    logPane.log(`${item.file} (${item.type}) - ${actions}`);
   });
 
   screen.append(header);
@@ -189,6 +202,7 @@ function startTUI(statusMessage = 'UI ready.') {
   });
   screen.key(['r'], () => execute(['record'], 'record'));
   screen.key(['e'], () => actionExtend());
+  screen.key(['i'], () => actionEdit());
   screen.key(['t'], () => actionRunExtended(false));
   screen.key(['h'], () => actionRunExtended(true));
   screen.key(['y'], () => actionRunRecording());
