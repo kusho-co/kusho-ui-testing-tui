@@ -1,4 +1,5 @@
-const blessed = require('blessed');
+const { clack } = require('./ui');
+const chalk = require('chalk');
 const fs = require('fs');
 const path = require('path');
 const spawn = require('cross-spawn');
@@ -8,12 +9,14 @@ const CLI_ENTRY = path.join(ROOT_DIR, 'index.js');
 const RECORDING_DIR = path.join(ROOT_DIR, 'kusho-tests', 'recordings');
 const EXTENDED_DIR = path.join(ROOT_DIR, 'kusho-tests', 'extended-tests');
 
+// ─── Artifact helpers ────────────────────────────────────────────────────────
+
 function readArtifacts() {
   const toItems = (dir, type) => {
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir)
       .filter(file => file.endsWith('.js'))
-      .map((file) => {
+      .map(file => {
         const fullPath = path.join(dir, file);
         const stats = fs.statSync(fullPath);
         return { type, file, fullPath, mtime: stats.mtime };
@@ -22,196 +25,160 @@ function readArtifacts() {
 
   const recordings = toItems(RECORDING_DIR, 'recording');
   const extended = toItems(EXTENDED_DIR, 'extended');
-  const all = [...recordings, ...extended].sort((a, b) => b.mtime - a.mtime);
-  return all;
+  return [...recordings, ...extended].sort((a, b) => b.mtime - a.mtime);
 }
 
-function runCommand(screen, args, onDone) {
-  screen.destroy();
-  const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
-    cwd: ROOT_DIR,
-    stdio: 'inherit',
-  });
-
-  child.on('close', (code) => {
-    onDone(`Command finished (${code === 0 ? 'ok' : `exit ${code}`})`);
+function runCommand(args) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
+      cwd: ROOT_DIR,
+      stdio: 'inherit',
+    });
+    child.on('close', (code) => resolve(code));
   });
 }
 
-function startTUI(statusMessage = 'UI ready.') {
-  const state = {
-    artifacts: [],
-  };
+// ─── Build select choices from artifacts ─────────────────────────────────────
 
-  const screen = blessed.screen({
-    smartCSR: true,
-    title: 'Kusho UI',
-  });
+function artifactChoices(artifacts) {
+  if (artifacts.length === 0) {
+    return [{ value: null, label: chalk.gray('(no artifacts yet)') }];
+  }
+  return artifacts.map(item => ({
+    value: item,
+    label: `${item.type === 'recording' ? chalk.blue('[R]') : chalk.green('[E]')} ${item.file}`,
+    hint: item.type === 'recording' ? 'recording' : 'extended test',
+  }));
+}
 
-  const header = blessed.box({
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: 3,
-    tags: true,
-    content: '{bold}Kusho Interactive UI{/bold} - Enter: file path - a: refresh - q: quit',
-    border: { type: 'line' },
-    style: { border: { fg: 'cyan' } },
-  });
+// ─── Sub-menus ───────────────────────────────────────────────────────────────
 
-  const listPane = blessed.list({
-    top: 3,
-    left: 0,
-    width: '45%',
-    height: '72%',
-    label: ' Artifacts (recordings + extended tests) ',
-    border: { type: 'line' },
-    keys: true,
-    mouse: true,
-    vi: true,
-    style: {
-      border: { fg: 'blue' },
-      selected: { bg: 'blue' },
-    },
-  });
-
-  const logPane = blessed.log({
-    top: 3,
-    left: '45%',
-    width: '55%',
-    height: '72%',
-    label: ' Activity ',
-    border: { type: 'line' },
-    tags: true,
-    scrollback: 400,
-    alwaysScroll: true,
-    style: { border: { fg: 'green' } },
-  });
-
-  const footer = blessed.box({
-    bottom: 0,
-    left: 0,
-    width: '100%',
-    height: '28%',
-    label: ' Actions ',
-    border: { type: 'line' },
-    style: { border: { fg: 'magenta' } },
-    content: [
-      'r: record flow',
-      'e: extend selected recording (or latest)',
-      'i: edit/edit selected extended test',
-      't: run selected extended test (or latest)',
-      'y: run selected recording (or latest)',
-      'h: run headed selected/latest extended test',
-      'c: update credentials',
-      'd: run demo',
-      'a: refresh artifact list',
-      'q: quit',
-    ].join('\n'),
-  });
-
-  function refreshArtifacts() {
-    state.artifacts = readArtifacts();
-    const rows = state.artifacts.length === 0
-      ? ['(no artifacts yet)']
-      : state.artifacts.map(item => `${item.type === 'recording' ? '[R]' : '[E]'} ${item.file}`);
-    listPane.setItems(rows);
-    screen.render();
+async function pickAndRun(action, artifacts) {
+  const choices = artifactChoices(artifacts);
+  if (!choices[0].value) {
+    clack.log.warn('No artifacts found. Record something first.');
+    return;
   }
 
-  function selectedArtifact() {
-    const idx = listPane.selected;
-    if (idx == null || idx < 0 || idx >= state.artifacts.length) return null;
-    return state.artifacts[idx];
+  const item = await clack.select({
+    message: 'Select a file:',
+    options: choices,
+  });
+  if (clack.isCancel(item)) return;
+
+  const args = buildArgs(action, item);
+  if (!args) {
+    clack.log.warn(`Action "${action}" is not valid for a ${item.type} file.`);
+    return;
   }
 
-  function execute(args, label) {
-    logPane.log(`{cyan-fg}Running:{/cyan-fg} ${label}`);
-    screen.render();
-    runCommand(screen, args, (result) => startTUI(`${label} -> ${result}`));
-  }
+  clack.log.info(`Running: ${args.join(' ')}`);
+  await runCommand(args);
+}
 
-  function actionExtend() {
-    const item = selectedArtifact();
-    if (item && item.type === 'recording') {
-      execute(['extend', item.file], `extend ${item.file}`);
-      return;
+function buildArgs(action, item) {
+  switch (action) {
+    case 'extend':
+      return item.type === 'recording' ? ['extend', item.file] : null;
+    case 'edit':
+      return item.type === 'extended' ? ['edit', item.file] : null;
+    case 'run':
+      return item.type === 'extended' ? ['run', item.file] : null;
+    case 'run-headed':
+      return item.type === 'extended' ? ['run', item.file, '--headed'] : null;
+    case 'run-recording':
+      return item.type === 'recording' ? ['run-recording', item.file] : null;
+    default:
+      return null;
+  }
+}
+
+// ─── Main TUI loop ────────────────────────────────────────────────────────────
+
+async function startTUI() {
+  clack.intro(chalk.bold.cyan('⚡ Kusho Interactive UI'));
+
+  while (true) {
+    // Refresh artifact list on each iteration
+    const artifacts = readArtifacts();
+    const recordingCount = artifacts.filter(a => a.type === 'recording').length;
+    const extendedCount  = artifacts.filter(a => a.type === 'extended').length;
+
+    clack.note(
+      `Recordings: ${chalk.blue(recordingCount)}   Extended tests: ${chalk.green(extendedCount)}`,
+      'Artifact summary'
+    );
+
+    const action = await clack.select({
+      message: 'What would you like to do?',
+      options: [
+        {
+          value: 'record',
+          label: `${chalk.cyan('🎬 Record')}  new test`,
+          hint: 'Opens Playwright codegen in browser',
+        },
+        {
+          value: 'extend',
+          label: `${chalk.yellow('📋 Extend')}  a recording → generate test cases`,
+          hint: 'Pick a [R] recording to expand with AI',
+        },
+        {
+          value: 'edit',
+          label: `${chalk.magenta('✨ Kusho Edit')}  generated tests`,
+          hint: 'Refine an [E] extended test with plain-English instructions',
+        },
+        {
+          value: 'run',
+          label: `${chalk.green('▶  Run')}  extended test`,
+          hint: 'Runs headless by default',
+        },
+        {
+          value: 'run-headed',
+          label: `${chalk.green('👁  Run headed')}  extended test`,
+          hint: 'Browser window visible',
+        },
+        {
+          value: 'run-recording',
+          label: `${chalk.green('▶  Run recording')}  (raw recording)`,
+          hint: 'Runs a [R] recording directly',
+        },
+        {
+          value: 'credentials',
+          label: `${chalk.gray('🔑 Update')}  credentials`,
+          hint: 'Change your LLM provider / API key',
+        },
+        {
+          value: 'demo',
+          label: `${chalk.gray('🎭 Demo')}  try with a sample app`,
+          hint: 'Runs Playwright codegen on demo.playwright.dev/todomvc',
+        },
+        {
+          value: 'quit',
+          label: chalk.red('✗  Quit'),
+        },
+      ],
+    });
+
+    if (clack.isCancel(action) || action === 'quit') {
+      clack.outro(chalk.green('Goodbye! 👋'));
+      process.exit(0);
     }
-    execute(['extend', 'latest'], 'extend latest');
-  }
 
-  function actionEdit() {
-    const item = selectedArtifact();
-    if (item && item.type === 'extended') {
-      execute(['edit', item.file], `edit ${item.file}`);
-      return;
-    }
-    execute(['edit', 'latest'], 'edit latest');
-  }
-
-  function actionRunExtended(headed = false) {
-    const item = selectedArtifact();
-    const args = ['run'];
-    if (item && item.type === 'extended') {
-      args.push(item.file);
+    if (action === 'record') {
+      clack.log.info('Starting Playwright recorder…');
+      await runCommand(['record']);
+    } else if (action === 'credentials') {
+      await runCommand(['credentials']);
+    } else if (action === 'demo') {
+      clack.log.info('Launching demo on demo.playwright.dev/todomvc…');
+      await runCommand(['demo']);
     } else {
-      args.push('latest');
+      await pickAndRun(action, artifacts);
     }
-    if (headed) args.push('--headed');
-    execute(args, args.join(' '));
+
+    // Small separator before looping back
+    console.log('');
   }
-
-  function actionRunRecording() {
-    const item = selectedArtifact();
-    if (item && item.type === 'recording') {
-      execute(['run-recording', item.file], `run-recording ${item.file}`);
-      return;
-    }
-    execute(['run-recording', 'latest'], 'run-recording latest');
-  }
-
-  listPane.on('select', () => {
-    const item = selectedArtifact();
-    if (!item) return;
-    const actions = item.type === 'recording'
-      ? '{cyan-fg}Actions:{/cyan-fg} e=extend, y=run-recording'
-      : '{cyan-fg}Actions:{/cyan-fg} i=edit, t=run, h=run-headed';
-    logPane.log(`${item.file} (${item.type}) - ${actions}`);
-  });
-
-  screen.append(header);
-  screen.append(listPane);
-  screen.append(logPane);
-  screen.append(footer);
-
-  logPane.log(`{green-fg}${statusMessage}{/green-fg}`);
-  logPane.log('Choose file and press action key.');
-
-  screen.key(['q', 'C-c'], () => process.exit(0));
-  screen.key(['a'], () => {
-    refreshArtifacts();
-    logPane.log('{blue-fg}Artifacts refreshed{/blue-fg}');
-  });
-  screen.key(['enter'], () => {
-    const item = selectedArtifact();
-    if (!item) {
-      logPane.log('{yellow-fg}No file selected{/yellow-fg}');
-      return;
-    }
-    logPane.log(`Path: ${item.fullPath}`);
-  });
-  screen.key(['r'], () => execute(['record'], 'record'));
-  screen.key(['e'], () => actionExtend());
-  screen.key(['i'], () => actionEdit());
-  screen.key(['t'], () => actionRunExtended(false));
-  screen.key(['h'], () => actionRunExtended(true));
-  screen.key(['y'], () => actionRunRecording());
-  screen.key(['c'], () => execute(['credentials'], 'credentials'));
-  screen.key(['d'], () => execute(['demo'], 'demo'));
-
-  refreshArtifacts();
-  listPane.focus();
-  screen.render();
 }
 
 module.exports = { startTUI };

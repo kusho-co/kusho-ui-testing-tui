@@ -2,12 +2,12 @@ const spawn = require("cross-spawn");
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
-const readline = require('readline');
 const { Select } = require('enquirer');
 const WaitEnhancer = require('./wait-enhancer');
 const LLMClient = require('./llm-client');
 const { DEFAULT_MODELS } = require('./llm-client');
 const ui = require('./ui');
+const { clack } = require('./ui');
 
 const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'gemini'];
 
@@ -188,45 +188,40 @@ class KushoRecorder {
     this.onCodeUpdate = callback;
   }
 
-  promptForFilename() {
+  async promptForFilename() {
     if (!this.currentCode || this.currentCode.trim() === '') {
-      console.log(chalk.yellow('⚠️  No code to save'));
+      ui.warning('No code to save.');
       return;
     }
 
-    console.log(chalk.green('✅ Recording completed!'));
+    ui.success('Recording completed!');
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
+    let filename = await clack.text({
+      message: 'Give your recording a name (without extension):',
+      placeholder: 'my-login-flow',
+      validate: () => undefined, // always valid — we'll generate a name if blank
     });
 
-    rl.question(chalk.cyan('💾 Enter filename for your test (without extension): '), (filename) => {
-      rl.close();
+    if (clack.isCancel(filename) || !filename || filename.trim() === '') {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      filename = `kusho-test-${timestamp}`;
+      clack.log.info(`Using auto-generated name: ${filename}`);
+    }
 
-      if (!filename || filename.trim() === '') {
-        // Generate default filename with timestamp
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        filename = `kusho-test-${timestamp}`;
-      }
+    // Ensure .test.js extension for Playwright
+    filename = filename.trim();
+    if (!filename.endsWith('.test.js')) {
+      filename = filename.endsWith('.js')
+        ? filename.replace('.js', '.test.js')
+        : filename + '.test.js';
+    }
 
-      // Ensure .test.js extension for Playwright
-      if (!filename.endsWith('.test.js')) {
-        if (filename.endsWith('.js')) {
-          filename = filename.replace('.js', '.test.js');
-        } else {
-          filename += '.test.js';
-        }
-      }
+    const finalPath = this.saveCodeToUniqueFile(filename);
+    ui.success(`Test saved!`);
+    ui.info(`File: ${finalPath}`);
 
-      // Save to unique file
-      const finalPath = this.saveCodeToUniqueFile(filename);
-      console.log(chalk.green(`🎉 Test saved successfully!`));
-      console.log(chalk.blue(`📁 File location: ${finalPath}`));
-
-      // Open editor for user to edit the file
-      this.openEditorInTerminal(finalPath);
-    });
+    // Open editor for user to edit the file
+    this.openEditorInTerminal(finalPath);
   }
 
   saveCodeToUniqueFile(filename) {
@@ -274,20 +269,27 @@ class KushoRecorder {
       this.tryTerminalEditor(filePath, editors, index + 1);
     });
 
-    editorProcess.on('close', (code) => {
+    editorProcess.on('close', async (code) => {
       if (code === 0) {
-        console.log(chalk.green('✅ File edited successfully!'));
+        ui.success('File edited successfully!');
 
-        // Prompt for optional instructions before generation starts
-        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        rl.question(chalk.cyan('\n💡 Any specific instructions for generating test variations? (Press Enter to skip): '), (answer) => {
-          rl.close();
-          const instructions = answer.trim();
-          if (instructions) console.log(chalk.cyan(`📋 Instructions noted: ${instructions}`));
-          this.extendScriptWithAPI(filePath, instructions);
+        // Prominently prompt for generation instructions
+        const instructions = await clack.text({
+          message: 'Any instructions for generating test variations?',
+          placeholder: 'e.g. focus on error cases, use auth token X, test empty fields…',
+          initialValue: '',
         });
+
+        const finalInstructions = clack.isCancel(instructions) ? '' : (instructions || '').trim();
+        if (finalInstructions) {
+          clack.log.info(`Instructions noted: ${finalInstructions}`);
+        } else {
+          clack.log.info('No instructions — using smart defaults.');
+        }
+
+        this.extendScriptWithAPI(filePath, finalInstructions);
       } else {
-        console.log(chalk.yellow('⚠️  Editor exited with errors while saving recording'));
+        ui.warning('Editor exited with errors while saving recording.');
       }
     });
   }
@@ -317,26 +319,20 @@ class KushoRecorder {
   }
 
   async promptForCredentials() {
-    ui.section('Configure LLM Provider');
-    ui.info('Configure your LLM provider to power KushoAI test generation');
-    console.log(chalk.gray('Your API key is stored locally in ~/.kusho-credentials and never sent anywhere except your chosen provider.\n'));
-
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (q) => new Promise((res) => rl.question(q, res));
+    clack.intro(chalk.bold.cyan('🔐 Configure LLM Provider'));
+    clack.log.info('Your API key is stored locally in ~/.kusho-credentials and never sent anywhere except your chosen provider.');
 
     // Step 1: Choose provider
-    console.log(chalk.cyan('🤖 Choose your LLM provider:'));
-    console.log('  1) OpenAI   (default model: gpt-4o)');
-    console.log('  2) Anthropic (default model: claude-3-5-sonnet-20241022)');
-    console.log('  3) Gemini   (default model: gemini-2.5-flash)');
-
-    let provider;
-    while (!provider) {
-      const choice = (await ask(chalk.cyan('Enter number (1-3): '))).trim();
-      const map = { '1': 'openai', '2': 'anthropic', '3': 'gemini' };
-      provider = map[choice] || (SUPPORTED_PROVIDERS.includes(choice) ? choice : null);
-      if (!provider) console.log(chalk.red('Invalid choice. Enter 1, 2, or 3.'));
-    }
+    const providerChoice = await clack.select({
+      message: 'Choose your LLM provider:',
+      options: [
+        { value: 'openai', label: 'OpenAI', hint: `default model: ${DEFAULT_MODELS.openai}` },
+        { value: 'anthropic', label: 'Anthropic', hint: `default model: ${DEFAULT_MODELS.anthropic}` },
+        { value: 'gemini', label: 'Gemini', hint: `default model: ${DEFAULT_MODELS.gemini}` },
+      ],
+    });
+    if (clack.isCancel(providerChoice)) throw new Error('Credentials setup cancelled.');
+    const provider = providerChoice;
 
     // Step 2: API key
     const providerLabel = provider === 'openai' ? 'OpenAI' : provider.charAt(0).toUpperCase() + provider.slice(1);
@@ -348,12 +344,16 @@ class KushoRecorder {
 
     // Step 3: Optional model override
     const defaultModel = DEFAULT_MODELS[provider];
-    const modelInput = (await ask(chalk.cyan(`🧠 Model (press Enter for default: ${defaultModel}): `))).trim();
-    const model = modelInput || defaultModel;
+    const modelInput = await clack.text({
+      message: 'Model override (press Enter for default):',
+      placeholder: defaultModel,
+      initialValue: '',
+    });
+    const model = (!clack.isCancel(modelInput) && modelInput && modelInput.trim())
+      ? modelInput.trim()
+      : defaultModel;
 
-    rl.close();
-
-    const credentials = { provider, apiKey, model };
+    const credentials = { provider, apiKey: apiKey.trim(), model };
 
     // Validate API key before saving — fail fast like backend validate_config()
     console.log(chalk.blue(`\n🔍 Validating ${providerLabel} API key...`));
@@ -361,14 +361,14 @@ class KushoRecorder {
       const llm = new LLMClient(credentials);
       const result = await llm.validateCredentials();
       if (!result.valid) {
-        console.log(chalk.red(`❌ Invalid API key: ${result.error}`));
-        console.log(chalk.yellow('Please try again with a valid API key.'));
+        s.stop(chalk.red(`❌ Invalid API key: ${result.error}`));
+        clack.log.warn('Please try again with a valid API key.');
         return await this.promptForCredentials();
       }
-      console.log(chalk.green(`✅ API key valid!`));
+      s.stop(chalk.green('✅ API key valid!'));
     } catch (error) {
-      console.log(chalk.red(`❌ Could not validate API key: ${error.message}`));
-      console.log(chalk.yellow('Please try again with a valid API key.'));
+      s.stop(chalk.red(`❌ Could not validate API key: ${error.message}`));
+      clack.log.warn('Please try again with a valid API key.');
       return await this.promptForCredentials();
     }
 
@@ -376,7 +376,7 @@ class KushoRecorder {
       fs.writeFileSync(this.credentialsFile, JSON.stringify(credentials, null, 2));
       console.log(chalk.green(`✅ Credentials saved! Using ${providerLabel} / ${model}`));
     } catch (error) {
-      console.log(chalk.yellow('⚠️  Warning: Could not save credentials to file'));
+      ui.warning('Could not save credentials to file.');
     }
 
     return credentials;
@@ -471,17 +471,13 @@ class KushoRecorder {
   }
 
   async generateTestCases(scriptContent, llm, instructions = '') {
-    console.log(chalk.blue('🎯 Generating test cases...'));
-    const loadingInterval = this.showLoadingIndicator('Analyzing script and generating test cases...');
+    const handle = this.showLoadingIndicator('Analyzing script and generating test cases…');
     try {
       const testCases = await llm.generateTestCases(scriptContent, instructions);
-      clearInterval(loadingInterval);
-      process.stdout.write('\n');
-      console.log(chalk.green('✅ Test cases generated successfully!'));
+      this._stopSpinner(handle, chalk.green('✅ Test cases generated!'));
       return testCases;
     } catch (error) {
-      clearInterval(loadingInterval);
-      process.stdout.write('\n');
+      this._stopSpinner(handle, chalk.red('❌ Test case generation failed.'));
       throw error;
     }
   }
@@ -518,36 +514,32 @@ class KushoRecorder {
   }
 
   async generateExtendedScript(originalScript, testCases, llm, instructions = '') {
-    console.log(chalk.blue('🔨 Generating extended test script...'));
-
-    // Start loading indicator
-    const loadingInterval = this.showLoadingIndicator('Creating test variations...');
+    const handle = this.showLoadingIndicator('Creating test variations…');
     try {
       const extendedScript = await llm.generateTestScripts(originalScript, testCases, instructions);
-      clearInterval(loadingInterval);
-      process.stdout.write('\n');
-      console.log(chalk.green('✅ Extended script generated successfully!'));
+      this._stopSpinner(handle, chalk.green('✅ Extended script generated!'));
       return extendedScript;
     } catch (error) {
-      clearInterval(loadingInterval);
-      process.stdout.write('\n');
+      this._stopSpinner(handle, chalk.red('❌ Script generation failed.'));
       throw error;
     }
   }
 
-  showLoadingIndicator(message = 'Kusho is thinking...') {
-    const emojiFrames = ['🤖', '🧠', '💡', '🧪', '💨', '🔪', '🌀', '🔍'];
-    const classicFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    const frames = [...emojiFrames, ...classicFrames];
-    const spinnerWidth = 4;
-    let frameIndex = 0;
+  showLoadingIndicator(message = 'Kusho is thinking…') {
+    const s = clack.spinner();
+    s.start(message);
+    // Return a fake interval handle so callers can still call clearInterval(handle)
+    // without errors — actual stopping is done via s.stop() after the await.
+    // We store the spinner on `this` so callers can stop it properly.
+    this._activeSpinner = s;
+    return { _clackSpinner: s };
+  }
 
-    return setInterval(() => {
-      const frame = frames[frameIndex % frames.length];
-      const paddedFrame = frame.padEnd(spinnerWidth, ' ');
-      process.stdout.write(`\r${paddedFrame}${chalk.green(message)}`);
-      frameIndex++;
-    }, 120);
+  _stopSpinner(handle, message) {
+    if (handle && handle._clackSpinner) {
+      handle._clackSpinner.stop(message || '');
+    }
+    this._activeSpinner = null;
   }
 
   async openEditorForFile(filePath) {
@@ -606,39 +598,36 @@ class KushoRecorder {
   }
 
   async postGenerationEditLoop(filePath, llm) {
-    console.log(chalk.blue('\n✏️ Edit mode'));
-    console.log(chalk.gray('Request changes to the generated tests in plain English.'));
-    console.log(chalk.gray('Examples: "add assertions for the page title", "add error case for empty password"'));
-    console.log(chalk.gray('Type "done" or leave blank to finish.\n'));
-
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ask = () => new Promise((res) => rl.question(chalk.cyan('✏️  Edit instruction (or "done" to exit): '), res));
+    clack.note(
+      `File: ${chalk.cyan(filePath)}\n` +
+      `Type a change in plain English, or leave blank / press Enter to finish.\n` +
+      `Examples: ${chalk.gray('"add assertions for the page title"')} · ${chalk.gray('"add error case for empty password"')}`,
+      '✨ Kusho Edit  —  refine your tests with AI'
+    );
 
     while (true) {
-      const instruction = (await ask()).trim();
+      const instruction = await clack.text({
+        message: 'Edit instruction:',
+        placeholder: 'Press Enter with no text to finish',
+      });
 
-      if (!instruction || instruction.toLowerCase() === 'done' || instruction.toLowerCase() === 'exit') {
-        rl.close();
-        console.log(chalk.green('\n✅ Finished! Your tests are ready.'));
-        console.log(chalk.blue(`📁 Final file: ${filePath}`));
+      const val = clack.isCancel(instruction) ? '' : (instruction || '').trim();
+
+      if (!val || val.toLowerCase() === 'done' || val.toLowerCase() === 'exit') {
+        ui.success('Finished! Your tests are ready.');
+        clack.log.info(`Final file: ${filePath}`);
         break;
       }
 
-      console.log(chalk.blue(`\n🔧 Applying: "${instruction}"...`));
-      const loadingInterval = this.showLoadingIndicator('Applying edits...');
-
+      const handle = this.showLoadingIndicator(`Applying: "${val}"…`);
       try {
         const currentScript = fs.readFileSync(filePath, 'utf8');
-        const editedScript = await llm.editTestScript(currentScript, instruction);
-        clearInterval(loadingInterval);
-        process.stdout.write('\n');
+        const editedScript = await llm.editTestScript(currentScript, val);
+        this._stopSpinner(handle, chalk.green('✅ Edit applied!'));
         fs.writeFileSync(filePath, editedScript);
-        console.log(chalk.green('✅ Edit applied successfully!'));
       } catch (error) {
-        clearInterval(loadingInterval);
-        process.stdout.write('\n');
-        console.log(chalk.red(`❌ Edit failed: ${error.message}`));
-        console.log(chalk.gray('File was not modified. Try a different instruction.'));
+        this._stopSpinner(handle, chalk.red(`❌ Edit failed: ${error.message}`));
+        clack.log.warn('File was not modified. Try a different instruction.');
       }
     }
   }

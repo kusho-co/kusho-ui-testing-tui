@@ -22,6 +22,7 @@ program
   .option('-o, --output <filename>', 'Output filename for generated code')
   .option('--no-wait-enhancement', 'Disable intelligent wait enhancement')
   .action(async (url, options) => {
+    ui.banner('KushoAI — Record');
     const recorder = new KushoRecorder();
     
     // Configure wait enhancement
@@ -63,6 +64,7 @@ program
   .command('demo')
   .description('Demo the recorder with a sample URL')
   .action(async () => {
+    ui.banner('KushoAI — Demo');
     ui.info('Starting demo with KushoAI...');
     
     const recorder = new KushoRecorder();
@@ -73,6 +75,7 @@ program
   .command('credentials')
   .description('Update KushoAI credentials')
   .action(async () => {
+    ui.banner('KushoAI — Credentials');
     const recorder = new KushoRecorder();
     await recorder.updateCredentials();
     ui.success('Credentials updated successfully!');
@@ -90,11 +93,12 @@ program
   .description('Extend an existing test file with KushoAI variations')
   .argument('[filename]', 'Filename, "latest", or leave empty to choose from list')
   .action(async (filename) => {
+    ui.banner('KushoAI — Extend');
     const recorder = new KushoRecorder();
-    
+
     try {
       let filePath;
-      
+
       if (!filename) {
         // Show list and let user choose
         filename = await recorder.chooseRecording();
@@ -103,7 +107,7 @@ program
           process.exit(0);
         }
       }
-      
+
       if (filename === 'latest') {
         filePath = recorder.getLatestRecording();
         if (!filePath) {
@@ -113,19 +117,19 @@ program
         console.log(chalk.blue(`📁 Using latest recording: ${filePath}`));
       } else {
         filePath = recorder.getRecordingPath(filename);
-        
+
         if (!fs.existsSync(filePath)) {
           console.log(chalk.red('❌ Recording not found:'), filePath);
           console.log(chalk.yellow('💡 Available recordings:'));
           recorder.listRecordings();
           process.exit(1);
         }
-        
+
         console.log(chalk.blue(`📁 Extending recording: ${filePath}`));
       }
-      
+
       await recorder.extendScriptWithAPI(filePath);
-      
+
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);
@@ -140,6 +144,7 @@ program
   .option('--headless', 'Run tests in headless mode (default)')
   .option('--record', 'Record test run with video and trace')
   .action(async (filename, options) => {
+    ui.banner('KushoAI — Run');
     const recorder = new KushoRecorder();
     
     try {
@@ -190,11 +195,12 @@ program
   .option('--headless', 'Run tests in headless mode (default)')
   .option('--record', 'Record test run with video and trace')
   .action(async (filename, options) => {
+    ui.banner('KushoAI — Run Recording');
     const recorder = new KushoRecorder();
-    
+
     try {
       let filePath;
-      
+
       if (!filename) {
         // Show list and let user choose
         filename = await recorder.chooseRecording();
@@ -203,7 +209,7 @@ program
           process.exit(0);
         }
       }
-      
+
       if (filename === 'latest') {
         filePath = recorder.getLatestRecording();
         if (!filePath) {
@@ -213,19 +219,19 @@ program
         console.log(chalk.blue(`📁 Using latest recording: ${filePath}`));
       } else {
         filePath = recorder.getRecordingPath(filename);
-        
+
         if (!fs.existsSync(filePath)) {
           console.log(chalk.red('❌ Recording not found:'), filePath);
           console.log(chalk.yellow('💡 Available recordings:'));
           recorder.listRecordings();
           process.exit(1);
         }
-        
+
         console.log(chalk.blue(`📁 Running recording: ${filePath}`));
       }
-      
+
       await recorder.runTest(filePath, options);
-      
+
     } catch (error) {
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);
@@ -238,6 +244,7 @@ program
   .description('Interactively edit an extended test script using natural language instructions')
   .argument('[filename]', 'Filename, "latest", or leave empty to choose from list')
   .action(async (filename) => {
+    ui.banner('KushoAI — Edit');
     const recorder = new KushoRecorder();
 
     try {
@@ -277,6 +284,14 @@ program
       console.error(chalk.red('❌ Error:'), error.message);
       process.exit(1);
     }
+  });
+
+program
+  .command('ui')
+  .description('Start the interactive TUI')
+  .action(async () => {
+    const { startTUI } = require('./tui');
+    startTUI();
   });
 
 // Show help if no command provided
