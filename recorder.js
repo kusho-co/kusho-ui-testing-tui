@@ -459,7 +459,7 @@ class KushoRecorder {
       console.log(chalk.blue(`📁 Extended script saved:   ${extendedFilePath}`));
 
       // Step 4: Post-generation interactive edit loop
-      // await this.postGenerationEditLoop(extendedFilePath, llm);
+      await this.postGenerationEditLoop(extendedFilePath, llm);
 
     } catch (error) {
       console.log(chalk.red('❌ Error extending script:'), error.message);
@@ -602,12 +602,8 @@ class KushoRecorder {
     return { edited_script: editedScript, remaining_generations: null };
   }
 
-  // ---------------------------------------------------------------------------
-  // Post-generation interactive edit loop
-  // ---------------------------------------------------------------------------
-
   async postGenerationEditLoop(filePath, llm) {
-    console.log(chalk.blue('\n✏️  Post-generation edit mode'));
+    console.log(chalk.blue('\n✏️ Edit mode'));
     console.log(chalk.gray('Request changes to the generated tests in plain English.'));
     console.log(chalk.gray('Examples: "add assertions for the page title", "add error case for empty password"'));
     console.log(chalk.gray('Type "done" or leave blank to finish.\n'));
@@ -648,6 +644,17 @@ class KushoRecorder {
     console.log(chalk.blue('🔐 Configure LLM provider credentials'));
     const credentials = await this.promptForCredentials();
     return credentials;
+  }
+
+  async editExtendedScript(filePath) {
+    console.log(chalk.blue(`\n✏️  Editing extended script: ${filePath}`));
+    try {
+      const credentials = await this.getCredentials();
+      const llm = new LLMClient(credentials);
+      await this.postGenerationEditLoop(filePath, llm);
+    } catch (error) {
+      console.log(chalk.red('❌ Error editing script:'), error.message);
+    }
   }
 
   wrapInTestFunction(code) {

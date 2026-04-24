@@ -123,11 +123,6 @@ class LLMClient {
     return this._provider.generate(prompt, temperature, maxTokens);
   }
 
-  // -------------------------------------------------------------------------
-  // Credential validation — sends minimal request to verify API key works
-  // Mirrors validate_config() from backend openai_provider.py / claude_provider.py
-  // -------------------------------------------------------------------------
-
   async validateCredentials() {
     try {
       await this._provider.generate('Say "ok"', 0, 5);
