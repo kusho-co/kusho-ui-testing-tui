@@ -336,7 +336,8 @@ class KushoRecorder {
     }
 
     // Step 2: API key
-    const apiKey = (await ask(chalk.cyan(`🔑 Enter your ${provider} API key: `))).trim();
+    const providerLabel = provider === 'openai' ? 'OpenAI' : provider.charAt(0).toUpperCase() + provider.slice(1);
+    const apiKey = (await ask(chalk.cyan(`🔑 Enter your ${providerLabel} API key: `))).trim();
     if (!apiKey) {
       rl.close();
       throw new Error('API key cannot be empty');
@@ -352,7 +353,7 @@ class KushoRecorder {
     const credentials = { provider, apiKey, model };
 
     // Validate API key before saving — fail fast like backend validate_config()
-    console.log(chalk.blue(`\n🔍 Validating ${provider} API key...`));
+    console.log(chalk.blue(`\n🔍 Validating ${providerLabel} API key...`));
     try {
       const llm = new LLMClient(credentials);
       const result = await llm.validateCredentials();
@@ -370,7 +371,7 @@ class KushoRecorder {
 
     try {
       fs.writeFileSync(this.credentialsFile, JSON.stringify(credentials, null, 2));
-      console.log(chalk.green(`✅ Credentials saved! Using ${provider} / ${model}`));
+      console.log(chalk.green(`✅ Credentials saved! Using ${providerLabel} / ${model}`));
     } catch (error) {
       console.log(chalk.yellow('⚠️  Warning: Could not save credentials to file'));
     }
@@ -457,9 +458,7 @@ class KushoRecorder {
       console.log(chalk.green('\n🎉 Script extended successfully!'));
       console.log(chalk.blue(`📁 Original file preserved: ${filePath}`));
       console.log(chalk.blue(`📁 Extended script saved:   ${extendedFilePath}`));
-
-      // Step 4: Post-generation interactive edit loop
-      await this.postGenerationEditLoop(extendedFilePath, llm);
+      console.log(chalk.gray('💡 Tip: Use `kusho edit` to make further changes to the generated script.'));
 
     } catch (error) {
       console.log(chalk.red('❌ Error extending script:'), error.message);
