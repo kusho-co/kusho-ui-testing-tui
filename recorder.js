@@ -44,24 +44,27 @@ class KushoRecorder {
       'playwright',
       'codegen',
       '--output', this.outputFile,
-      '--target', options.target || 'javascript',
-      '--viewport-size', options.viewport || '1280,720'
+      '--target', options.target || 'javascript'
     ];
 
-    // Add device emulation if specified
     if (options.device) {
       args.push('--device', options.device);
+      // If a device is chosen, only override viewport if user explicitly passed it
+      if (options.viewport) {
+        args.push('--viewport-size', options.viewport);
+      }
+    } else {
+      // Default to decent desktop resolution if no device is used
+      args.push('--viewport-size', options.viewport || '1280,720');
     }
 
-    // Add URL if provided
     if (url) {
       args.push(url);
     }
 
     // Start codegen process
     this.codegenProcess = spawn('npx', args, {
-      stdio: 'inherit',
-      shell: true
+      stdio: 'inherit'
     });
 
     // Handle process events
@@ -78,11 +81,32 @@ class KushoRecorder {
     this.watchForChanges();
 
     return new Promise((resolve) => {
-      // Wait a bit for the process to start
-      setTimeout(() => {
-        ui.success('KushoAI recorder started! Interact with browser to generate code.');
+      let startupTimer = setTimeout(() => {
+        startupTimer = null;
+        console.log(chalk.green('✅ KushoAI recorder started! Interact with the browser to generate code.'));
         resolve();
       }, 2000);
+
+      this.codegenProcess.on('close', (code) => {
+        this.stopWatching();
+
+        // If it closed before the 2s timer, it crashed immediately
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+          startupTimer = null;
+          if (code !== 0) {
+            console.log(chalk.red(`❌ Recorder exited early (code ${code}). Check the error above.`));
+            resolve();
+            return;
+          }
+          resolve();
+        }
+
+        // Only prompt for filename if it exited cleanly (no crash)
+        if (code === 0) {
+          this.promptForFilename();
+        }
+      });
     });
   }
 
@@ -92,7 +116,7 @@ class KushoRecorder {
       if (fs.existsSync(this.outputFile)) {
         this.startFileWatcher();
       } else {
-        setTimeout(checkFile, 500);
+        this.pollTimeout = setTimeout(checkFile, 500);
       }
     };
 
@@ -169,6 +193,10 @@ class KushoRecorder {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+    }
+    if (this.pollTimeout) {
+      clearTimeout(this.pollTimeout);
+      this.pollTimeout = null;
     }
   }
 

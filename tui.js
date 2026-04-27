@@ -9,8 +9,6 @@ const CLI_ENTRY = path.join(ROOT_DIR, 'index.js');
 const RECORDING_DIR = path.join(ROOT_DIR, 'kusho-tests', 'recordings');
 const EXTENDED_DIR = path.join(ROOT_DIR, 'kusho-tests', 'extended-tests');
 
-// ─── Artifact helpers ────────────────────────────────────────────────────────
-
 function readArtifacts() {
   const toItems = (dir, type) => {
     if (!fs.existsSync(dir)) return [];
@@ -22,7 +20,6 @@ function readArtifacts() {
         return { type, file, fullPath, mtime: stats.mtime };
       });
   };
-
   const recordings = toItems(RECORDING_DIR, 'recording');
   const extended = toItems(EXTENDED_DIR, 'extended');
   return [...recordings, ...extended].sort((a, b) => b.mtime - a.mtime);
@@ -38,7 +35,76 @@ function runCommand(args) {
   });
 }
 
-// ─── Build select choices from artifacts ─────────────────────────────────────
+/**
+ * Ask for optional record arguments: URL, device, viewport.
+ * Returns an array of CLI args to append, e.g. ['https://...', '--device', 'iPhone 13']
+ * Returns null if the user cancelled.
+ */
+async function promptRecordArgs() {
+  const url = await clack.text({
+    message: 'Start URL  (optional — press Enter to open a blank browser):',
+    placeholder: 'https://your-app.com',
+    initialValue: '',
+  });
+  if (clack.isCancel(url)) return null;
+
+  const wantAdvanced = await clack.confirm({
+    message: 'Configure device / viewport options?',
+    initialValue: false,
+  });
+  if (clack.isCancel(wantAdvanced)) return null;
+
+  const args = [];
+  if (url && url.trim()) args.push(url.trim());
+
+  if (wantAdvanced) {
+    const device = await clack.text({
+      message: 'Device to emulate  (optional):',
+      placeholder: 'e.g. iPhone 13, Pixel 5 — press Enter to skip',
+      initialValue: '',
+    });
+    if (clack.isCancel(device)) return null;
+    if (device && device.trim()) args.push('--device', device.trim());
+
+    const viewport = await clack.text({
+      message: 'Viewport size  (optional):',
+      placeholder: 'e.g. 1280,720 — press Enter for default',
+      initialValue: '',
+    });
+    if (clack.isCancel(viewport)) return null;
+    if (viewport && viewport.trim()) args.push('--viewport', viewport.trim());
+  }
+
+  return args;
+}
+
+/**
+ * Ask for run-mode options: headed/headless + optional video recording.
+ * Returns an array of flag args to append, or null if cancelled.
+ */
+async function promptRunOptions() {
+  const mode = await clack.select({
+    message: 'Run mode:',
+    options: [
+      { value: 'headless', label: chalk.cyan('🔍 Headless'), hint: 'default — no browser window' },
+      { value: 'headed', label: chalk.green('👁  Headed'), hint: 'browser window visible' },
+    ],
+  });
+  if (clack.isCancel(mode)) return null;
+
+  const recordVideo = await clack.confirm({
+    message: 'Record video + trace for this run?',
+    initialValue: false,
+  });
+  if (clack.isCancel(recordVideo)) return null;
+
+  const args = [];
+  if (mode === 'headed') args.push('--headed');
+  if (recordVideo) args.push('--record');
+  return args;
+}
+
+// ─── Artifact file picker ─────────────────────────────────────────────────────
 
 function artifactChoices(artifacts) {
   if (artifacts.length === 0) {
@@ -50,8 +116,6 @@ function artifactChoices(artifacts) {
     hint: item.type === 'recording' ? 'recording' : 'extended test',
   }));
 }
-
-// ─── Sub-menus ───────────────────────────────────────────────────────────────
 
 async function pickAndRun(action, artifacts) {
   const choices = artifactChoices(artifacts);
@@ -66,17 +130,26 @@ async function pickAndRun(action, artifacts) {
   });
   if (clack.isCancel(item)) return;
 
-  const args = buildArgs(action, item);
-  if (!args) {
-    clack.log.warn(`Action "${action}" is not valid for a ${item.type} file.`);
+  // Collect run options for actions that support them
+  let extraArgs = [];
+  if (action === 'run' || action === 'run-recording') {
+    const opts = await promptRunOptions();
+    if (opts === null) return;   // user cancelled
+    extraArgs = opts;
+  }
+
+  const baseArgs = buildBaseArgs(action, item);
+  if (!baseArgs) {
+    clack.log.warn(`"${action}" is not valid for a ${item.type} file.`);
     return;
   }
 
-  clack.log.info(`Running: ${args.join(' ')}`);
-  await runCommand(args);
+  const finalArgs = [...baseArgs, ...extraArgs];
+  clack.log.info(`Running: kusho ${finalArgs.join(' ')}`);
+  await runCommand(finalArgs);
 }
 
-function buildArgs(action, item) {
+function buildBaseArgs(action, item) {
   switch (action) {
     case 'extend':
       return item.type === 'recording' ? ['extend', item.file] : null;
@@ -84,8 +157,6 @@ function buildArgs(action, item) {
       return item.type === 'extended' ? ['edit', item.file] : null;
     case 'run':
       return item.type === 'extended' ? ['run', item.file] : null;
-    case 'run-headed':
-      return item.type === 'extended' ? ['run', item.file, '--headed'] : null;
     case 'run-recording':
       return item.type === 'recording' ? ['run-recording', item.file] : null;
     default:
@@ -93,16 +164,13 @@ function buildArgs(action, item) {
   }
 }
 
-// ─── Main TUI loop ────────────────────────────────────────────────────────────
-
 async function startTUI() {
   clack.intro(chalk.bold.cyan('⚡ Kusho Interactive UI'));
 
   while (true) {
-    // Refresh artifact list on each iteration
     const artifacts = readArtifacts();
     const recordingCount = artifacts.filter(a => a.type === 'recording').length;
-    const extendedCount  = artifacts.filter(a => a.type === 'extended').length;
+    const extendedCount = artifacts.filter(a => a.type === 'extended').length;
 
     clack.note(
       `Recordings: ${chalk.blue(recordingCount)}   Extended tests: ${chalk.green(extendedCount)}`,
@@ -115,7 +183,7 @@ async function startTUI() {
         {
           value: 'record',
           label: `${chalk.cyan('🎬 Record')}  new test`,
-          hint: 'Opens Playwright codegen in browser',
+          hint: 'Opens Playwright codegen — you\'ll set URL / device next',
         },
         {
           value: 'extend',
@@ -124,23 +192,18 @@ async function startTUI() {
         },
         {
           value: 'edit',
-          label: `${chalk.magenta('✨ Kusho Edit')}  generated tests`,
+          label: `${chalk.magenta('✨ Kusho Edit')}  an extended test`,
           hint: 'Refine an [E] extended test with plain-English instructions',
         },
         {
           value: 'run',
           label: `${chalk.green('▶  Run')}  extended test`,
-          hint: 'Runs headless by default',
-        },
-        {
-          value: 'run-headed',
-          label: `${chalk.green('👁  Run headed')}  extended test`,
-          hint: 'Browser window visible',
+          hint: 'Pick a file, then choose headless / headed',
         },
         {
           value: 'run-recording',
           label: `${chalk.green('▶  Run recording')}  (raw recording)`,
-          hint: 'Runs a [R] recording directly',
+          hint: 'Pick a [R] file, then choose headless / headed',
         },
         {
           value: 'credentials',
@@ -165,18 +228,25 @@ async function startTUI() {
     }
 
     if (action === 'record') {
-      clack.log.info('Starting Playwright recorder…');
-      await runCommand(['record']);
+      const recordArgs = await promptRecordArgs();
+      if (recordArgs === null) {
+        clack.log.warn('Record cancelled.');
+      } else {
+        clack.log.info(`Starting recorder${recordArgs.length ? ` with: ${recordArgs.join(' ')}` : '…'}`);
+        await runCommand(['record', ...recordArgs]);
+      }
+
     } else if (action === 'credentials') {
       await runCommand(['credentials']);
+
     } else if (action === 'demo') {
       clack.log.info('Launching demo on demo.playwright.dev/todomvc…');
       await runCommand(['demo']);
+
     } else {
       await pickAndRun(action, artifacts);
     }
 
-    // Small separator before looping back
     console.log('');
   }
 }
