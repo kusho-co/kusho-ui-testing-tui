@@ -36,8 +36,8 @@ function runCommand(args) {
 }
 
 /**
- * Ask for optional record arguments: URL, device, viewport.
- * Returns an array of CLI args to append, e.g. ['https://...', '--device', 'iPhone 13']
+ * Ask for optional record arguments: URL, device, viewport, target, output, wait-enhancement.
+ * Returns an array of CLI args to append.
  * Returns null if the user cancelled.
  */
 async function promptRecordArgs() {
@@ -49,7 +49,7 @@ async function promptRecordArgs() {
   if (clack.isCancel(url)) return null;
 
   const wantAdvanced = await clack.confirm({
-    message: 'Configure device / viewport options?',
+    message: 'Configure advanced options?',
     initialValue: false,
   });
   if (clack.isCancel(wantAdvanced)) return null;
@@ -58,6 +58,7 @@ async function promptRecordArgs() {
   if (url && url.trim()) args.push(url.trim());
 
   if (wantAdvanced) {
+    // Device emulation
     const device = await clack.text({
       message: 'Device to emulate  (optional):',
       placeholder: 'e.g. iPhone 13, Pixel 5 — press Enter to skip',
@@ -66,13 +67,49 @@ async function promptRecordArgs() {
     if (clack.isCancel(device)) return null;
     if (device && device.trim()) args.push('--device', device.trim());
 
-    const viewport = await clack.text({
-      message: 'Viewport size  (optional):',
-      placeholder: 'e.g. 1280,720 — press Enter for default',
+    // Only offer viewport override when no device is selected
+    // (device emulation sets its own native resolution automatically)
+    if (!device || !device.trim()) {
+      const viewport = await clack.text({
+        message: 'Viewport size  (optional):',
+        placeholder: 'e.g. 1280,720 — press Enter for default (1280,720)',
+        initialValue: '',
+      });
+      if (clack.isCancel(viewport)) return null;
+      if (viewport && viewport.trim()) args.push('--viewport', viewport.trim());
+    }
+
+    // Target language
+    const target = await clack.select({
+      message: 'Target language for generated code:',
+      options: [
+        { value: 'javascript', label: 'JavaScript', hint: 'default' },
+        { value: 'typescript', label: 'TypeScript' },
+        { value: 'python',     label: 'Python' },
+        { value: 'java',       label: 'Java' },
+        { value: 'csharp',     label: 'C#' },
+      ],
+      initialValue: 'javascript',
+    });
+    if (clack.isCancel(target)) return null;
+    if (target !== 'javascript') args.push('--target', target);
+
+    // Custom output filename
+    const output = await clack.text({
+      message: 'Output filename  (optional — leave blank to name it after recording):',
+      placeholder: 'e.g. my-login-flow.js',
       initialValue: '',
     });
-    if (clack.isCancel(viewport)) return null;
-    if (viewport && viewport.trim()) args.push('--viewport', viewport.trim());
+    if (clack.isCancel(output)) return null;
+    if (output && output.trim()) args.push('--output', output.trim());
+
+    // Wait enhancement toggle
+    const disableWait = await clack.confirm({
+      message: 'Disable intelligent wait enhancement?',
+      initialValue: false,
+    });
+    if (clack.isCancel(disableWait)) return null;
+    if (disableWait) args.push('--no-wait-enhancement');
   }
 
   return args;

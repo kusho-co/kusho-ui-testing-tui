@@ -48,13 +48,10 @@ class KushoRecorder {
     ];
 
     if (options.device) {
+      // Device defines its own viewport — never override it
       args.push('--device', options.device);
-      // If a device is chosen, only override viewport if user explicitly passed it
-      if (options.viewport) {
-        args.push('--viewport-size', options.viewport);
-      }
     } else {
-      // Default to decent desktop resolution if no device is used
+      // No device: use explicit viewport or fall back to 1280,720
       args.push('--viewport-size', options.viewport || '1280,720');
     }
 

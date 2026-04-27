@@ -203,25 +203,28 @@ Try the recorder with Playwright's demo site:
 kusho demo
 ```
 
-### Interactive TUI (New)
+### Interactive TUI
 
-Open full interactive terminal UI for running flows directly:
+Open the full interactive menu to run all flows guided step-by-step:
 
 ```bash
 kusho ui
 ```
 
-Inside TUI:
-- `r` start recording flow
-- `e` extend selected recording (or latest)
-- `t` run selected extended test (or latest)
-- `y` run selected recording (or latest)
-- `h` run selected/latest extended test in headed mode
-- `c` open credentials setup
-- `d` run demo flow
-- `a` refresh artifacts list
-- `Enter` show selected file path
-- `q` quit
+The TUI presents an arrow-key menu with all available actions:
+
+| Action | What it does |
+|---|---|
+| 🎬 Record | Prompts for URL, device, viewport, target language, output filename, wait-enhancement — then opens Playwright codegen |
+| 📋 Extend | Pick a recording → AI expands it into test variations |
+| ✨ Kusho Edit | Pick an extended test → refine it with plain-English instructions |
+| ▶ Run | Pick an extended test → choose headless/headed + optional video recording |
+| ▶ Run recording | Pick a raw recording → choose headless/headed + optional video |
+| 🔑 Update credentials | Change LLM provider / API key |
+| 🎭 Demo | Opens Playwright codegen on demo.playwright.dev/todomvc |
+| ✗ Quit | Exit |
+
+Every option available via direct `kusho <command>` flags is also surfaced in the TUI. Press `Esc` or `Ctrl+C` at any prompt to cancel and return to the main menu.
 
 ### Step 3: Review & Edit Tests
 
