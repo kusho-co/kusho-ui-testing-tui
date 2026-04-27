@@ -231,23 +231,23 @@ After saving, you'll be prompted to provide optional instructions to guide the A
 
 Kusho combines your recording and customized tests to create a comprehensive, executable test script. This process:
 - Merges your original recording with customized test scenarios
-- Creates multiple test variations and edge cases
+- Creates multiple test variations and edge cases based on any instructions you provided
 - Converts everything into optimized Playwright code
 - Generates a comprehensive test script ready for execution
 
-Once generated, you'll enter an interactive edit loop to refine the script using plain English. Type `done` to finish.
-
-```
-✏️  Edit instruction (or "done" to exit): add assertions for the page title
-✅ Edit applied!
-
-✏️  Edit instruction (or "done" to exit): done
-```
-
-You can also re-enter this edit loop anytime using:
+Once your comprehensive test script is generated, you can use the `kusho edit` command to interactively refine the script using plain English instructions.
 
 ```bash
 kusho edit [filename|latest]
+```
+
+This starts an interactive edit loop where you can describe changes you want to apply to your script:
+
+```
+✏️  Edit instruction (or "done" to exit): add assertions for the page title
+✅ Edit applied successfully!
+
+✏️  Edit instruction (or "done" to exit): done
 ```
 
 ### Extend Existing Test File (Advanced)
