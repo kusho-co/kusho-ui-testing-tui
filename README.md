@@ -108,7 +108,7 @@ kusho credentials
 ```
 
 You'll be prompted to choose a provider and enter your API key:
-1. **OpenAI** (default model: `gpt-4o-mini`) - [Get an API key](https://platform.openai.com/api-keys)
+1. **OpenAI** (default model: `gpt-4o`) - [Get an API key](https://platform.openai.com/api-keys)
 2. **Anthropic** (default model: `claude-haiku-4-5-20251001`) - [Get an API key](https://console.anthropic.com/settings/keys)
 3. **Gemini** (default model: `gemini-2.5-flash`) - [Get an API key](https://aistudio.google.com/app/apikey)
 
@@ -304,7 +304,6 @@ kusho run your-test-name --headed --record
 **Run Options:**
 - `--headed`: Run tests in visible browser (great for debugging)
 - `--record`: Record videos and screenshots during test execution
-- `--device`: Test on specific device emulations
 
 **Test Reports:**
 After running tests, you'll get comprehensive reports with:

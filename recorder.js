@@ -69,11 +69,6 @@ class KushoRecorder {
       ui.error(`Failed to start recorder: ${error.message}`);
     });
 
-    this.codegenProcess.on('close', (code) => {
-      this.stopWatching();
-      this.promptForFilename();
-    });
-
     // Start watching for file changes
     this.watchForChanges();
 
@@ -84,7 +79,7 @@ class KushoRecorder {
         resolve();
       }, 2000);
 
-      this.codegenProcess.on('close', (code) => {
+      this.codegenProcess.on('close', async (code) => {
         this.stopWatching();
 
         // If it closed before the 2s timer, it crashed immediately
@@ -361,11 +356,13 @@ class KushoRecorder {
 
     // Step 2: API key
     const providerLabel = provider === 'openai' ? 'OpenAI' : provider.charAt(0).toUpperCase() + provider.slice(1);
-    const apiKey = (await ask(chalk.cyan(`🔑 Enter your ${providerLabel} API key: `))).trim();
-    if (!apiKey) {
-      rl.close();
-      throw new Error('API key cannot be empty');
-    }
+    const apiKeyInput = await clack.text({
+      message: `Enter your ${providerLabel} API key:`,
+      placeholder: 'sk-...',
+      validate: (v) => (!v || !v.trim()) ? 'API key cannot be empty.' : undefined,
+    });
+    if (clack.isCancel(apiKeyInput)) throw new Error('Credentials setup cancelled.');
+    const apiKey = apiKeyInput.trim();
 
     // Step 3: Optional model override
     const defaultModel = DEFAULT_MODELS[provider];
@@ -378,10 +375,11 @@ class KushoRecorder {
       ? modelInput.trim()
       : defaultModel;
 
-    const credentials = { provider, apiKey: apiKey.trim(), model };
+    const credentials = { provider, apiKey, model };
 
     // Validate API key before saving — fail fast like backend validate_config()
-    console.log(chalk.blue(`\n🔍 Validating ${providerLabel} API key...`));
+    const s = clack.spinner();
+    s.start(`Validating ${providerLabel} API key...`);
     try {
       const llm = new LLMClient(credentials);
       const result = await llm.validateCredentials();
@@ -399,7 +397,7 @@ class KushoRecorder {
 
     try {
       fs.writeFileSync(this.credentialsFile, JSON.stringify(credentials, null, 2));
-      console.log(chalk.green(`✅ Credentials saved! Using ${providerLabel} / ${model}`));
+      clack.log.success(`Credentials saved! Using ${providerLabel} / ${model}`);
     } catch (error) {
       ui.warning('Could not save credentials to file.');
     }
@@ -408,45 +406,33 @@ class KushoRecorder {
   }
 
   async promptForNewFilename(currentFilename) {
-    console.log(chalk.blue('📝 Please provide a new filename for the extended test'));
-
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
+    const input = await clack.text({
+      message: `Enter new filename (current: ${currentFilename}):`,
+      placeholder: currentFilename,
+      validate: () => undefined,
     });
 
-    return new Promise((resolve) => {
-      rl.question(chalk.cyan(`💾 Enter new filename (current: ${currentFilename}): `), (newFilename) => {
-        rl.close();
+    if (clack.isCancel(input) || !input || input.trim() === '') return null;
 
-        if (!newFilename || newFilename.trim() === '') {
-          resolve(null); // User wants to cancel
-          return;
-        }
+    let finalFilename = input.trim();
 
-        let finalFilename = newFilename.trim();
+    // Ensure .test.js extension if the original had it
+    if (currentFilename.endsWith('.test.js') && !finalFilename.endsWith('.test.js')) {
+      finalFilename = finalFilename.endsWith('.js')
+        ? finalFilename.replace('.js', '.test.js')
+        : finalFilename + '.test.js';
+    } else if (currentFilename.endsWith('.js') && !finalFilename.endsWith('.js')) {
+      finalFilename += '.js';
+    }
 
-        // Ensure .test.js extension if the original had it
-        if (currentFilename.endsWith('.test.js') && !finalFilename.endsWith('.test.js')) {
-          if (finalFilename.endsWith('.js')) {
-            finalFilename = finalFilename.replace('.js', '.test.js');
-          } else {
-            finalFilename += '.test.js';
-          }
-        } else if (currentFilename.endsWith('.js') && !finalFilename.endsWith('.js')) {
-          finalFilename += '.js';
-        }
+    // Check if the new filename also exists
+    const newPath = path.join(this.extendedDir, finalFilename);
+    if (fs.existsSync(newPath)) {
+      clack.log.error(`File ${finalFilename} already exists. Please choose a different name.`);
+      return null;
+    }
 
-        // Check if the new filename also exists
-        const newPath = path.join(this.extendedDir, finalFilename);
-        if (fs.existsSync(newPath)) {
-          console.log(chalk.red(`❌ File ${finalFilename} also exists. Please choose a different name.`));
-          resolve(null);
-        } else {
-          resolve(finalFilename);
-        }
-      });
-    });
+    return finalFilename;
   }
 
   async extendScriptWithAPI(filePath, instructions = '') {

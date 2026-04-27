@@ -85,9 +85,11 @@ async function promptRecordArgs() {
       options: [
         { value: 'javascript', label: 'JavaScript', hint: 'default' },
         { value: 'typescript', label: 'TypeScript' },
-        { value: 'python',     label: 'Python' },
-        { value: 'java',       label: 'Java' },
-        { value: 'csharp',     label: 'C#' },
+        { value: 'python', label: 'Python' },
+        { value: 'python-async', label: 'Python (async)' },
+        { value: 'python-pytest', label: 'Python (pytest)' },
+        { value: 'java', label: 'Java' },
+        { value: 'csharp', label: 'C#' },
       ],
       initialValue: 'javascript',
     });
@@ -104,6 +106,11 @@ async function promptRecordArgs() {
     if (output && output.trim()) args.push('--output', output.trim());
 
     // Wait enhancement toggle
+    clack.log.info(
+      'Intelligent wait enhancement automatically inserts smart pauses after\n' +
+      '    clicks, navigations, and form interactions to make generated tests\n' +
+      '    more reliable. Disable only if you want to manage waits manually.'
+    );
     const disableWait = await clack.confirm({
       message: 'Disable intelligent wait enhancement?',
       initialValue: false,
@@ -141,8 +148,6 @@ async function promptRunOptions() {
   return args;
 }
 
-// ─── Artifact file picker ─────────────────────────────────────────────────────
-
 function artifactChoices(artifacts) {
   if (artifacts.length === 0) {
     return [{ value: null, label: chalk.gray('(no artifacts yet)') }];
@@ -155,9 +160,21 @@ function artifactChoices(artifacts) {
 }
 
 async function pickAndRun(action, artifacts) {
-  const choices = artifactChoices(artifacts);
+  // Only show files that are valid for the chosen action
+  const typeFilter = {
+    'run': 'extended',
+    'run-recording': 'recording',
+    'extend': 'recording',
+    'edit': 'extended',
+  };
+  const filtered = typeFilter[action]
+    ? artifacts.filter(a => a.type === typeFilter[action])
+    : artifacts;
+
+  const choices = artifactChoices(filtered);
   if (!choices[0].value) {
-    clack.log.warn('No artifacts found. Record something first.');
+    const label = typeFilter[action] === 'recording' ? 'recordings' : 'extended tests';
+    clack.log.warn(`No ${label} found. ${typeFilter[action] === 'recording' ? 'Run \'Record\' first.' : 'Run \'Extend\' on a recording first.'}`);
     return;
   }
 
