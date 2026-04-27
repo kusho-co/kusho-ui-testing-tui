@@ -26,7 +26,7 @@ class OpenAIProvider {
           model: this.model,
           messages: [{ role: 'user', content: prompt }],
           temperature,
-          max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
         });
         return response.choices[0].message.content;
       } catch (error) {
