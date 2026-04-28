@@ -1,8 +1,8 @@
-# [KushoAI CLI](https://github.com/kusho-co/kusho-cli/)
+# [KushoAI UI Testing TUI](https://github.com/kusho-co/kusho-ui-testing-tui/)
 
-AI-powered CLI tool for recording UI interactions and generating comprehensive test suites.
+AI-powered TUI tool for recording UI interactions and generating comprehensive test suites.
 
-KushoAI CLI takes your recorded user flows and generates exhaustive test variations. Record your user flow once, and KushoAI creates multiple test cases with different inputs, edge cases, and scenarios to provide thorough test coverage. The tool transforms manual testing into intelligent, automated test scenarios with minimal effort.
+KushoAI TUI takes your recorded user flows and generates exhaustive test variations. Record your user flow once, and KushoAI creates multiple test cases with different inputs, edge cases, and scenarios to provide thorough test coverage. The tool transforms manual testing into intelligent, automated test scenarios with minimal effort.
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/E1yqiloZCNw/0.jpg)](https://youtu.be/E1yqiloZCNw?si=2JC9XgEYGvSvEF5K)
 
@@ -80,8 +80,8 @@ vim --version
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/kusho-co/kusho-cli.git
-cd kusho-cli
+git clone https://github.com/kusho-co/kusho-ui-testing-tui.git
+cd kusho-ui-testing-tui
 ```
 
 ## Installation
@@ -101,7 +101,7 @@ After linking, you can use the `kusho` command syntax throughout your terminal.
 
 ### Step 1: Configure LLM Provider
 
-KushoAI CLI runs entirely locally and generates tests using your own LLM API keys. Before recording, configure your preferred provider:
+KushoAI TUI runs entirely locally and generates tests using your own LLM API keys. Before recording, configure your preferred provider:
 
 ```bash
 kusho credentials
