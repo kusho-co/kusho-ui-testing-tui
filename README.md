@@ -99,19 +99,20 @@ After linking, you can use the `kusho` command syntax throughout your terminal.
 
 ## Getting Started
 
-### Step 1: Setup Credentials
+### Step 1: Configure LLM Provider
 
-Before recording, configure your authentication:
+KushoAI CLI runs entirely locally and generates tests using your own LLM API keys. Before recording, configure your preferred provider:
 
 ```bash
 kusho credentials
 ```
 
-You'll be prompted to enter:
-- Your email address
-- Authentication token (get this from the Kusho webapp UI Testing section)
+You'll be prompted to choose a provider and enter your API key:
+1. **OpenAI** (default model: `gpt-4o`) - [Get an API key](https://platform.openai.com/api-keys)
+2. **Anthropic** (default model: `claude-haiku-4-5-20251001`) - [Get an API key](https://console.anthropic.com/settings/keys)
+3. **Gemini** (default model: `gemini-2.5-flash`) - [Get an API key](https://aistudio.google.com/app/apikey)
 
-This step is required for CLI authentication and must be completed before recording.
+You can optionally override the default model during setup. Your API keys are stored locally in `~/.kusho-credentials` and are never sent to any external servers other than your chosen LLM provider.
 
 ## Workflow
 
@@ -202,6 +203,29 @@ Try the recorder with Playwright's demo site:
 kusho demo
 ```
 
+### Interactive TUI
+
+Open the full interactive menu to run all flows guided step-by-step:
+
+```bash
+kusho ui
+```
+
+The TUI presents an arrow-key menu with all available actions:
+
+| Action | What it does |
+|---|---|
+| 🎬 Record | Prompts for URL, device, viewport, target language, output filename, wait-enhancement — then opens Playwright codegen |
+| 📋 Extend | Pick a recording → AI expands it into test variations |
+| ✨ Kusho Edit | Pick an extended test → refine it with plain-English instructions |
+| ▶ Run | Pick an extended test → choose headless/headed + optional video recording |
+| ▶ Run recording | Pick a raw recording → choose headless/headed + optional video |
+| 🔑 Update credentials | Change LLM provider / API key |
+| 🎭 Demo | Opens Playwright codegen on demo.playwright.dev/todomvc |
+| ✗ Quit | Exit |
+
+Every option available via direct `kusho <command>` flags is also surfaced in the TUI. Press `Esc` or `Ctrl+C` at any prompt to cancel and return to the main menu.
+
 ### Step 3: Review & Edit Tests
 
 After recording, Kusho AI generates comprehensive test scenarios that open in your terminal editor:
@@ -219,13 +243,35 @@ After recording, Kusho AI generates comprehensive test scenarios that open in yo
 
 **Save the file to proceed to test generation.**
 
+After saving, you'll be prompted to provide optional instructions to guide the AI:
+
+```
+💡 Any specific instructions for generating test variations? (Press Enter to skip):
+> add error handling tests and verify error messages are displayed correctly
+```
+
 ### Step 4: Generate Exhaustive Test Script
 
 Kusho combines your recording and customized tests to create a comprehensive, executable test script. This process:
 - Merges your original recording with customized test scenarios
-- Creates multiple test variations and edge cases
+- Creates multiple test variations and edge cases based on any instructions you provided
 - Converts everything into optimized Playwright code
 - Generates a comprehensive test script ready for execution
+
+Once your comprehensive test script is generated, you can use the `kusho edit` command to interactively refine the script using plain English instructions.
+
+```bash
+kusho edit [filename|latest]
+```
+
+This starts an interactive edit loop where you can describe changes you want to apply to your script:
+
+```
+✏️  Edit instruction (or "done" to exit): add assertions for the page title
+✅ Edit applied successfully!
+
+✏️  Edit instruction (or "done" to exit): done
+```
 
 ### Extend Existing Test File (Advanced)
 
@@ -258,7 +304,6 @@ kusho run your-test-name --headed --record
 **Run Options:**
 - `--headed`: Run tests in visible browser (great for debugging)
 - `--record`: Record videos and screenshots during test execution
-- `--device`: Test on specific device emulations
 
 **Test Reports:**
 After running tests, you'll get comprehensive reports with:
@@ -268,9 +313,9 @@ After running tests, you'll get comprehensive reports with:
 - Error details and debugging information
 - HTML report accessible via browser
 
-### Update Credentials
+### Update LLM Provider Settings
 
-Update your KushoAI credentials anytime:
+Change your LLM provider or update your API key anytime:
 
 ```bash
 kusho credentials
