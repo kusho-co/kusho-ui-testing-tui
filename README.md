@@ -112,6 +112,9 @@ You'll be prompted to choose a provider and enter your API key:
 2. **Anthropic** (default model: `claude-haiku-4-5-20251001`) - [Get an API key](https://console.anthropic.com/settings/keys)
 3. **Gemini** (default model: `gemini-2.5-flash`) - [Get an API key](https://aistudio.google.com/app/apikey)
 
+<img width="1068" height="496" alt="kusho cred 3" src="https://github.com/user-attachments/assets/1b95946a-820f-4391-baa2-52de16dcc33e" />
+<br>
+
 You can optionally override the default model during setup. Your API keys are stored locally in `~/.kusho-credentials` and are never sent to any external servers other than your chosen LLM provider.
 
 ## Workflow
@@ -210,6 +213,9 @@ Open the full interactive menu to run all flows guided step-by-step:
 ```bash
 kusho ui
 ```
+
+<img width="837" height="418" alt="kusho ui" src="https://github.com/user-attachments/assets/8fd56ad5-1a65-4fa7-ab62-a588b6d676a0" />
+<br>
 
 The TUI presents an arrow-key menu with all available actions:
 
