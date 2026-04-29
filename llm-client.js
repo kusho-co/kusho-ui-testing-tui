@@ -5,6 +5,7 @@ const DEFAULT_MODELS = {
 };
 
 const MAX_TOKENS = 3000;
+const MAX_TOKENS_GEMINI = 8192;
 const TEMPERATURE_GENERATE = 0.7;
 const TEMPERATURE_EDIT = 0.3;
 const MAX_RETRIES = 3;
@@ -120,7 +121,8 @@ class LLMClient {
 
   // Low-level call
   async _call(prompt, temperature = TEMPERATURE_GENERATE, maxTokens = MAX_TOKENS) {
-    return this._provider.generate(prompt, temperature, maxTokens);
+    const tokens = this.providerName === 'gemini' ? MAX_TOKENS_GEMINI : maxTokens;
+    return this._provider.generate(prompt, temperature, tokens);
   }
 
   async validateCredentials() {
@@ -134,15 +136,27 @@ class LLMClient {
 
   // Response cleaning
   _clean(response) {
+    let code;
+
     if (response.includes('```javascript')) {
-      const match = response.match(/```javascript\s*([\s\S]*?)\s*```/);
-      if (match) return match[1].trim();
+      // Extract ALL javascript code blocks and join them
+      const matches = [...response.matchAll(/```javascript\s*([\s\S]*?)\s*```/g)];
+      code = matches.length > 0 ? matches.map(m => m[1].trim()).join('\n\n') : response.trim();
+    } else if (response.includes('```')) {
+      // Extract ALL generic code blocks and join them
+      const matches = [...response.matchAll(/```\s*([\s\S]*?)\s*```/g)];
+      code = matches.length > 0 ? matches.map(m => m[1].trim()).join('\n\n') : response.trim();
+    } else {
+      code = response.trim();
     }
-    if (response.includes('```')) {
-      const match = response.match(/```\s*([\s\S]*?)\s*```/);
-      if (match) return match[1].trim();
-    }
-    return response.trim();
+
+    // Strip stray import/require lines — _combineTestFunctions adds the single import
+    code = code
+      .split('\n')
+      .filter(line => !line.trim().startsWith('import ') && !line.trim().startsWith('const { test') && !line.trim().startsWith('const {test'))
+      .join('\n');
+
+    return code.trim();
   }
 
   // Prompt builders 
@@ -225,8 +239,11 @@ test('Original Test Flow', async ({ page }) => {
 });
 \`\`\`
 
-**Output Format:**
-Return only the test functions (no imports, those will be added separately):
+**CRITICAL Output Rules:**
+- Return only the test functions — NO import statements, NO require statements
+- Wrap ALL test functions in a single \`\`\`javascript code block
+- Every test function MUST be complete with closing \`})\` — never truncate mid-function
+- If you cannot fit all tests, write fewer tests but make each one complete
 `;
     if (instructions) {
       prompt += `\n**Additional Instructions from User:**\n${instructions}\nMake sure to apply these instructions when writing the test scripts.\n`;
